@@ -3,6 +3,7 @@ const GrainFactory = require('../core/GrainFactory.js');
 const cluster = require('cluster');
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
+const serializeError = require('serialize-error');
 
 class SiloWorkerRuntime extends SiloRuntime {
   constructor(config) {
@@ -22,15 +23,26 @@ class SiloWorkerRuntime extends SiloRuntime {
     console.log(`worker ${cluster.worker.process.pid} got msg: ${payload.uuid} ${payload.msg} ${payload.grainReference} ${payload.key}`);
     switch (payload.msg) {
       case Messages.GET_ACTIVATION: {
-        this.getGrainActivation(payload.grainReference, payload.key);
-        console.log(`worker ${cluster.worker.process.pid} sending msg activated`);
-        cluster.worker.send({
-          msg: Messages.ACTIVATED,
-          uuid: payload.uuid,
-          pid: cluster.worker.process.pid,
-          grainReference: payload.grainReference,
-          key: payload.key,
-        });
+        try {
+          this.getGrainActivation(payload.grainReference, payload.key);
+          console.log(`worker ${cluster.worker.process.pid} sending msg activated`);
+          cluster.worker.send({
+            msg: Messages.ACTIVATED,
+            uuid: payload.uuid,
+            pid: cluster.worker.process.pid,
+            grainReference: payload.grainReference,
+            key: payload.key,
+          });
+        } catch (e) {
+          cluster.worker.send({
+            msg: Messages.ACTIVATION_ERROR,
+            uuid: payload.uuid,
+            pid: cluster.worker.process.pid,
+            grainReference: payload.grainReference,
+            key: payload.key,
+            error: serializeError(e) //TODO - check that the exception is an error object and handle
+          });
+        }
         break;
       }
       case Messages.INVOKE: {

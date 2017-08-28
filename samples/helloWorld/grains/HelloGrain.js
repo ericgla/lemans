@@ -4,6 +4,7 @@ class HelloGrain extends Grain {
 
   constructor(key) {
     super(key);
+    throw new Error('from HelloGrain');
   }
 
   async sayHello(m, timeout) {

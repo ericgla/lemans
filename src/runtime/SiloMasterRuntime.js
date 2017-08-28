@@ -71,6 +71,14 @@ class SiloMasterRuntime extends SiloRuntime {
     console.log(`master got msg from pid ${pid}: ${payload.uuid} ${payload.msg} ${payload.grainReference} ${payload.key}`);
     const identity = this.getIdentityString(payload.grainReference, payload.key);
     switch (payload.msg) {
+      case Messages.GET_ACTIVATION: {
+        // a worker is requesting a grain activation.
+        // TODO
+        // if there is an activation, return the pid containing the activation to the worker,
+        // and the worker will directly message the worker with the activation
+        // if no activation exists, create it and send the pid
+        break;
+      }
       case Messages.ACTIVATED: {
         // the grain was activated on the worker.  update the activation map with the pid of the worker
         this.grainActivations[identity] = {
@@ -79,13 +87,18 @@ class SiloMasterRuntime extends SiloRuntime {
         };
         // resolve the pending promise for this message uuid
         // TODO check that pid exists and throw exception
-        this.promises[payload.uuid](this.grainActivations[identity].activation);
+        this.promises[payload.uuid].resolve(this.grainActivations[identity].activation);
+        break;
+      }
+      case Messages.ACTIVATION_ERROR: {
+        // reject the pending promise for this message uuid
+        this.promises[payload.uuid].reject(payload.error);
         break;
       }
       case Messages.INVOKE_RESULT: {
         // resolve the pending promise for this message uuid
         // TODO check that pid exists and throw exception
-        this.promises[payload.uuid](payload.result);
+        this.promises[payload.uuid].resolve(payload.result);
         break;
       }
       default:
@@ -103,8 +116,8 @@ class SiloMasterRuntime extends SiloRuntime {
     if (this.grainActivations[identity] === undefined) {
       // there is no activation for this identity, tell a worker to create it.
       const uuid = uuidv4();
-      return new Promise((resolve) => {
-        this.promises[uuid] = resolve;
+      return new Promise((resolve, reject) => {
+        this.promises[uuid] = { resolve, reject };
         console.log('master sending message getActivation');
         cluster.workers[this.getWorkerIndex()].send({
           msg: Messages.GET_ACTIVATION,
@@ -120,8 +133,8 @@ class SiloMasterRuntime extends SiloRuntime {
   async invoke({ grainReference, key, method, args }) {
     const identity = `${grainReference}_${key}`;
     const uuid = uuidv4();
-    return new Promise(async (resolve) => {
-      this.promises[uuid] = resolve;
+    return new Promise(async (resolve, reject) => {
+      this.promises[uuid] = { resolve, reject };
       const pid = this.grainActivations[identity].pid;
       const workerIndex = getWorkerByPid(pid);
       console.log(`master sending message invoke to pid ${pid}`);

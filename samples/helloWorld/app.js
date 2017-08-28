@@ -14,12 +14,16 @@ const cluster = require('cluster');
   await silo.start();
 
   if (silo.isMaster) {
-    const grain1 = await GrainFactory.getGrain('HelloGrain', 1);
-    const result = await grain1.sayHello('test');
-    console.log(result);
+    try {
+      const grain1 = await GrainFactory.getGrain('HelloGrain', 1);
+      const result = await grain1.sayHello('test');
+      console.log(result);
 
-    const grain2 = await GrainFactory.getGrain('HelloGrain', 2);
-    const result2 = await grain2.sayHello('test');
-    console.log(result2);
+      const grain2 = await GrainFactory.getGrain('HelloGrain', 2);
+      const result2 = await grain2.sayHello('test');
+      console.log(result2);
+    } catch (e) {
+      console.log(`ERROR ${JSON.stringify(e)}`);
+    }
   }
 })();
