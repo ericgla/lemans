@@ -1,0 +1,25 @@
+{
+  "name": "lemans",
+  "version": "1.0.0",
+  "description": "Virtual actors for javascript, insprired by Orleans (https://github.com/dotnet/orleans)",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "test": "./node_modules/.bin/istanbul cover ./node_modules/mocha/bin/_mocha",
+    "tdd:mac": "./node_modules/.bin/mocha -w"
+  },
+  "dependencies": {
+    "uuid": "^3.1.0",
+    "winston": "^2.3.1"
+  },
+  "devDependencies": {
+    "chai": "^4.1.1",
+    "eslint": "^4.5.0",
+    "eslint-config-airbnb-base": "^11.3.2",
+    "eslint-plugin-import": "^2.7.0",
+    "istanbul": "^0.4.5",
+    "mocha": "^3.5.0",
+    "sinon": "^3.2.1",
+    "sinon-chai": "^2.13.0"
+  }
+}

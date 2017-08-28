@@ -1,0 +1,3 @@
+app
+--require ./test/common.js
+--recursive
