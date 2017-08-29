@@ -29,7 +29,9 @@ class SiloWorkerRuntime extends SiloRuntime {
   }
 
   async processIncomingMessage(payload) {
-    winston.info(`worker ${cluster.worker.process.pid} got msg: ${payload.uuid} ${payload.msg} ${payload.grainReference} ${payload.key}`);
+    winston.info(`worker ${cluster.worker.process.pid} 
+      got msg: ${payload.uuid} ${payload.msg} ${payload.grainReference} ${payload.key}`);
+
     switch (payload.msg) {
       case Messages.GET_ACTIVATION: {
         try {

@@ -18,16 +18,19 @@ winston.level = 'error';
   if (silo.isMaster) {
     try {
       console.log('building grain refs...');
-      const ref = [];
+      const g = [];
       let refStart = moment();
-      for (let i = 0; i < 1000; i++) {
-        const a = await GrainFactory.getGrain('HelloGrain', i);
-        ref.push(a);
+      for (let i = 0; i < 10000; i++) {
+        g.push(GrainFactory.getGrain('HelloGrain', i));
       }
+      const grainRefs = await Promise.all(g);
       console.log('done.');
       console.log(moment().diff(refStart, 'milliseconds'));
+
       refStart = moment();
-      ref.forEach(r => r.echo('test').then(c => console.log(c)));
+      grainRefs.forEach(r => r.echo('test'));
+      await Promise.all(g);
+      console.log('done.');
       console.log(moment().diff(refStart, 'milliseconds'));
     } catch (e) {
       console.log(`ERROR ${e}`);
