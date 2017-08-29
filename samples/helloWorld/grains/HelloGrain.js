@@ -6,6 +6,7 @@ class HelloGrain extends Grain {
   onActivate() {
     winston.info(`onActivate called from HelloGrain key ${this.key}`);
     super.onActivate();
+    this.count = 0;
   }
 
   onDeactivate() {
@@ -13,9 +14,9 @@ class HelloGrain extends Grain {
     super.onDeactivate();
   }
 
-  async sayHello(m, timeout) {
-    this.deactivateOnIdle();
-    return `sayHello ${m}`;
+  async echo(m) {
+    this.count += 1;
+    return `HelloGrain pid ${process.pid} key ${this.key} count ${this.count} ${m}`;
   }
 }
 

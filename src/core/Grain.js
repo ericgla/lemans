@@ -15,6 +15,10 @@ class Grain {
   async deactivateOnIdle() {
     this.runtime.queueEndActivation(this.identity);
   }
+
+  get GrainFactory() {
+    return this.runtime.grainFactory;
+  }
 }
 
 module.exports = Grain;

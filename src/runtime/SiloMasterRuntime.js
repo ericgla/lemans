@@ -2,7 +2,7 @@ const GrainProxyFactory = require('../core/GrainProxyFactory');
 const GrainFactory = require('../core/GrainFactory.js');
 const cluster = require('cluster');
 const os = require('os');
-const uuidv4 = require('uuid/v4');
+
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
 const winston = require('winston');
@@ -22,7 +22,10 @@ class SiloMasterRuntime extends SiloRuntime {
     winston.info(`initializing master runtime pid ${process.pid}`);
     super();
     this.config = config;
-    this.grainProxies = GrainProxyFactory.create(config.grains, this);
+    this.grainProxies = {
+      local: GrainProxyFactory.createLocal(config.grains, this),
+      remote: GrainProxyFactory.createRemote(config.grains, this)
+    };
     this.grainActivations = [];
     this.grainFactory = new GrainFactory(this);
     this.nextWorkerIndex = 1;
@@ -62,6 +65,10 @@ class SiloMasterRuntime extends SiloRuntime {
     });
   }
 
+  get GrainFactory() {
+    return this.grainFactory;
+  }
+
   /**
    * gets the index of the worker to send the task to.
    * for now it's simply round robin, but should be expanded to take other metrics into account
@@ -82,32 +89,66 @@ class SiloMasterRuntime extends SiloRuntime {
     switch (payload.msg) {
       case Messages.GET_ACTIVATION: {
         // a worker is requesting a grain activation.
-        // TODO
-        // if there is an activation, return the pid containing the activation to the worker,
-        // and the worker will directly message the worker with the activation
-        // if no activation exists, create it and send the pid
+        try {
+          const activation = await this.getGrainActivation(payload.grainReference, payload.key);
+          cluster.workers[getWorkerByPid(payload.pid)].send({
+            msg: Messages.ACTIVATED,
+            uuid: payload.uuid,
+            pid: process.pid,
+            activationPid: activation.pid,
+            grainReference: payload.grainReference,
+            key: payload.key
+          });
+        } catch (e) {
+          cluster.workers[getWorkerByPid(payload.pid)].send({
+            msg: Messages.ACTIVATION_ERROR,
+            uuid: payload.uuid,
+            pid: process.pid,
+            grainReference: payload.grainReference,
+            key: payload.key,
+            error: payload.error
+          });
+        }
+        break;
+      }
+      case Messages.INVOKE: {
+        try {
+          const result = await this.invoke(payload);
+          cluster.workers[getWorkerByPid(payload.pid)].send({
+            msg: Messages.INVOKE_RESULT,
+            uuid: payload.uuid,
+            pid: process.pid,
+            grainReference: payload.grainReference,
+            key: payload.key,
+            result
+          });
+        } catch (e) {
+          cluster.workers[getWorkerByPid(payload.pid)].send({
+            msg: Messages.INVOKE_ERROR,
+            uuid: payload.uuid,
+            pid: process.pid,
+            grainReference: payload.grainReference,
+            key: payload.key,
+            error: payload.error
+          });
+        }
         break;
       }
       case Messages.ACTIVATED: {
         // the grain was activated on the worker.  update the activation map with the pid of the worker
-        this.grainActivations[identity] = {
-          activation: new this.grainProxies[payload.grainReference](payload.key),
-          pid: payload.pid
-        };
+        this.grainActivations[identity] = new this.grainProxies.remote[payload.grainReference](payload.key, identity, payload.pid);
         // resolve the pending promise for this message uuid
-        // TODO check that pid exists and throw exception
-        this.promises[payload.uuid].resolve(this.grainActivations[identity].activation);
+        this.getPromise(payload.uuid).resolve(this.grainActivations[identity]);
         break;
       }
       case Messages.ACTIVATION_ERROR: {
         // reject the pending promise for this message uuid
-        this.promises[payload.uuid].reject(payload.error);
+        this.getPromise(payload.uuid).reject(payload.error);
         break;
       }
       case Messages.INVOKE_RESULT: {
         // resolve the pending promise for this message uuid
-        // TODO check that pid exists and throw exception
-        this.promises[payload.uuid].resolve(payload.result);
+        this.getPromise(payload.uuid).resolve(payload.result);
         break;
       }
       case Messages.DEACTIVATED: {
@@ -118,20 +159,17 @@ class SiloMasterRuntime extends SiloRuntime {
         break;
     }
   }
-
   /*
    * returns a grain proxy object for the given grain reference and key
-   * the
    */
   async getGrainActivation(grainReference, key) {
     const identity = `${grainReference}_${key}`;
     // the master runtime never contains any activations, only workers
     if (this.grainActivations[identity] === undefined) {
       // there is no activation for this identity, tell a worker to create it.
-      const uuid = uuidv4();
       return new Promise((resolve, reject) => {
-        this.promises[uuid] = { resolve, reject };
-        console.log('master sending message getActivation');
+        const uuid = this.addPromise(resolve, reject);
+        winston.info('master sending message getActivation');
         cluster.workers[this.getWorkerIndex()].send({
           msg: Messages.GET_ACTIVATION,
           grainReference,
@@ -140,17 +178,17 @@ class SiloMasterRuntime extends SiloRuntime {
         });
       });
     }
-    return Promise.resolve(this.grainActivations[identity].activation);
+    return Promise.resolve(this.grainActivations[identity]);
   }
 
   async invoke({ grainReference, key, method, args }) {
-    const identity = `${grainReference}_${key}`;
-    const uuid = uuidv4();
+    const identity = this.getIdentityString(grainReference, key);
+
     return new Promise(async (resolve, reject) => {
-      this.promises[uuid] = { resolve, reject };
+      const uuid = this.addPromise(resolve, reject);
       const pid = this.grainActivations[identity].pid;
       const workerIndex = getWorkerByPid(pid);
-      console.log(`master sending message invoke to pid ${pid}`);
+      winston.info(`master sending message invoke method ${method} to pid ${pid}`);
       cluster.workers[workerIndex].send({
         msg: Messages.INVOKE,
         grainReference,

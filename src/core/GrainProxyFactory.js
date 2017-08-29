@@ -3,14 +3,18 @@ const Queue = require('./Queue');
 const Grain = require('./Grain');
 const cluster = require('cluster');
 
-const buildForwardingGrainProxy = (grainReference, grainClass, runtime) => {
+const buildRemoteGrainProxy = (grainReference, grainClass, runtime) => {
   winston.info(`creating forwarding proxy for grain ${grainReference}`);
 
-  function GrainProxy(key, identity) {
+  function GrainProxy(key, identity, pid) {
+    this.location = 'remote';
     this.key = key;
     this.identity = identity;
     this.runtime = runtime;
+    this.pid = pid;
   }
+  GrainProxy.prototype.getPid = () => this.pid;
+  GrainProxy.prototype.getLocation = () => this.location;
 
   Object.getOwnPropertyNames(grainClass.prototype).forEach((method) => {
     if (method !== 'constructor') {
@@ -32,16 +36,19 @@ const buildForwardingGrainProxy = (grainReference, grainClass, runtime) => {
   return GrainProxy;
 }
 
-const buildWorkerGrainProxy = (grainReference, GrainClass, runtime) => {
+const buildLocalGrainProxy = (grainReference, GrainClass, runtime) => {
   winston.info(`creating worker proxy for grain ${grainReference}`);
 
   function GrainProxy(key, identity) {
+    this.location = 'local';
     this.key = key;
     this.identity = identity;
     this.runtime = runtime;
     this.grain = new GrainClass(key, identity, runtime);
     this.methodQueue = new Queue();
     this.processing = false;
+
+    GrainProxy.prototype.getLocation = () => this.location;
 
     this.enqueueGrainMethod = async(method, args) => {
       winston.info(`enqueue key ${key} method ${method} size ${this.methodQueue.size}`);
@@ -107,16 +114,25 @@ const buildWorkerGrainProxy = (grainReference, GrainClass, runtime) => {
   return GrainProxy;
 };
 
-const buildGrainProxies = (grains, runtime) => {
+const buildLocalGrainProxies = (grains, runtime) => {
   const proxies = [];
 
   Object.entries(grains).forEach(([grainReference, grain]) => {
     if (grain.prototype instanceof Grain) {
-      if (cluster.isMaster) {
-        proxies[grainReference] = buildForwardingGrainProxy(grainReference, grain, runtime);
-      } else {
-        proxies[grainReference] = buildWorkerGrainProxy(grainReference, grain, runtime);
-      }
+      proxies[grainReference] = buildLocalGrainProxy(grainReference, grain, runtime);
+    } else {
+      throw new Error(`grain reference ${grainReference} does not inherit from Grain`);
+    }
+  });
+  return proxies;
+};
+
+const buildRemoteGrainProxies = (grains, runtime) => {
+  const proxies = [];
+
+  Object.entries(grains).forEach(([grainReference, grain]) => {
+    if (grain.prototype instanceof Grain) {
+      proxies[grainReference] = buildRemoteGrainProxy(grainReference, grain, runtime);
     } else {
       throw new Error(`grain reference ${grainReference} does not inherit from Grain`);
     }
@@ -125,5 +141,6 @@ const buildGrainProxies = (grains, runtime) => {
 };
 
 module.exports = {
-  create: buildGrainProxies
+  createLocal: buildLocalGrainProxies,
+  createRemote: buildRemoteGrainProxies
 };
