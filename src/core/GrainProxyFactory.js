@@ -4,10 +4,11 @@ const Grain = require('./Grain');
 const cluster = require('cluster');
 
 const buildForwardingGrainProxy = (grainReference, grainClass, runtime) => {
-  winston.debug(`creating forwarding proxy for grain ${grainReference}`);
+  winston.info(`creating forwarding proxy for grain ${grainReference}`);
 
-  function GrainProxy(key) {
+  function GrainProxy(key, identity) {
     this.key = key;
+    this.identity = identity;
     this.runtime = runtime;
   }
 
@@ -32,17 +33,43 @@ const buildForwardingGrainProxy = (grainReference, grainClass, runtime) => {
 }
 
 const buildWorkerGrainProxy = (grainReference, GrainClass, runtime) => {
-  winston.debug(`creating worker proxy for grain ${grainReference}`);
+  winston.info(`creating worker proxy for grain ${grainReference}`);
 
-  function GrainProxy(key) {
+  function GrainProxy(key, identity) {
     this.key = key;
+    this.identity = identity;
     this.runtime = runtime;
-    this.grain = new GrainClass(key);
+    this.grain = new GrainClass(key, identity, runtime);
     this.methodQueue = new Queue();
     this.processing = false;
+
+    this.enqueueGrainMethod = async(method, args) => {
+      winston.info(`enqueue key ${key} method ${method} size ${this.methodQueue.size}`);
+      return new Promise((resolve, reject) => {
+        // queue the grain call for later execution
+        this.methodQueue.enqueue(
+          async () => {
+            try {
+              winston.info(`calling method key ${key} method ${method}`);
+              const result = await this.grain[method](...args);
+              resolve(result);
+            } catch (err) {
+              // forward the error to the caller
+              reject(err);
+            }
+          }
+        );
+        if (!this.processing) {
+          // start processing any queued grain calls
+          this.processing = true;
+          setTimeout(this.processQueueItem, 1);
+        }
+      });
+    };
+
     this.processQueueItem = async () => {
       if (this.methodQueue.size > 0) {
-        winston.debug(`dequeue key ${key} size ${this.methodQueue.size}`);
+        winston.info(`dequeue key ${key} size ${this.methodQueue.size}`);
         const fn = this.methodQueue.dequeue();
         await fn();
         await this.processQueueItem();
@@ -52,32 +79,28 @@ const buildWorkerGrainProxy = (grainReference, GrainClass, runtime) => {
     };
   }
 
-  Object.getOwnPropertyNames(GrainClass.prototype).forEach((method) => {
+  /*
+   * add the base class proxy methods first.  if the grain subclass has overridden any base methods,
+   * the proxy methods will also be overridden
+   */
+  Object.getOwnPropertyNames(Grain.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.debug(`creating proxy for method ${method}`);
+      winston.info(`creating proxy for ${method}`);
 
       GrainProxy.prototype[method] = function (...args) {
         // the call to the grain method is will be queued for later execution,
-        // return a promise to the caller
-        return new Promise((resolve, reject) => {
-          // queue the grain call for later execution
-          this.methodQueue.enqueue(
-            async () => {
-              try {
-                const result = await this.grain[method](...args);
-                resolve(result);
-              } catch (err) {
-                // forward the error to the caller
-                reject(err);
-              }
-            }
-          );
-          if (!this.processing) {
-            // start processing any queued grain calls
-            this.processing = true;
-            setTimeout(this.processQueueItem, 1);
-          }
-        });
+        return this.enqueueGrainMethod(method, args);
+      };
+    }
+  });
+
+  Object.getOwnPropertyNames(GrainClass.prototype).forEach((method) => {
+    if (method !== 'constructor') {
+      winston.info(`${GrainProxy.prototype[method] === undefined ? 'creating' : 'overriding'} proxy for ${method}`);
+
+      GrainProxy.prototype[method] = function (...args) {
+        // the call to the grain method is will be queued for later execution,
+        return this.enqueueGrainMethod(method, args);
       };
     }
   });

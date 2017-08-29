@@ -1,20 +1,21 @@
 const {Grain} = require('../../../src');
+const winston = require('winston');
 
 class HelloGrain extends Grain {
 
-  constructor(key) {
-    super(key);
-    throw new Error('from HelloGrain');
+  onActivate() {
+    winston.info(`onActivate called from HelloGrain key ${this.key}`);
+    super.onActivate();
+  }
+
+  onDeactivate() {
+    winston.info(`onDeactivate called from HelloGrain key ${this.key}`);
+    super.onDeactivate();
   }
 
   async sayHello(m, timeout) {
-    const p = await new Promise(resolve => setTimeout(() => resolve(`sayHello ${m}`), timeout));
-    return p;
-  }
-
-  async sayHello2(m, timeout) {
-    throw new Error('test');
-    return 'sayHello2';
+    this.deactivateOnIdle();
+    return `sayHello ${m}`;
   }
 }
 

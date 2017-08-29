@@ -5,6 +5,7 @@ const os = require('os');
 const uuidv4 = require('uuid/v4');
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
+const winston = require('winston');
 
 const getWorkerByPid = (pid) => {
   let index;
@@ -18,6 +19,7 @@ const getWorkerByPid = (pid) => {
 
 class SiloMasterRuntime extends SiloRuntime {
   constructor(config) {
+    winston.info(`initializing master runtime pid ${process.pid}`);
     super();
     this.config = config;
     this.grainProxies = GrainProxyFactory.create(config.grains, this);
@@ -36,13 +38,15 @@ class SiloMasterRuntime extends SiloRuntime {
         cluster.fork();
       }
 
+      /*
+       * wait for each worker to come online and send a ready message
+       */
       cluster.on('online', (worker) => {
-        console.log(`-ONLINE ${worker.id} pid ${worker.process.pid}-`);
         worker.on('message', (payload) => {
           // the worker isn't ready to process messages until the worker runtime's constructor is called
           // not sure if we really need to do this, or there is a different worker message to listen for
           if (payload.msg === 'ready') {
-            console.log(`-READY ${worker.id} pid ${worker.process.pid}-`);
+            winston.info(`worker id ${worker.id} ready. pid ${worker.process.pid}`);
             onlineWorkers += 1;
             if (this.numWorkers === onlineWorkers) {
               Object.keys(cluster.workers).forEach((key) => {
@@ -58,6 +62,11 @@ class SiloMasterRuntime extends SiloRuntime {
     });
   }
 
+  /**
+   * gets the index of the worker to send the task to.
+   * for now it's simply round robin, but should be expanded to take other metrics into account
+   * such as # of activations on the worker, worker busy time, etc
+   */
   getWorkerIndex() {
     const index = this.nextWorkerIndex;
     this.nextWorkerIndex += 1;
@@ -68,7 +77,7 @@ class SiloMasterRuntime extends SiloRuntime {
   }
 
   async processIncomingMessage(payload, pid) {
-    console.log(`master got msg from pid ${pid}: ${payload.uuid} ${payload.msg} ${payload.grainReference} ${payload.key}`);
+    winston.info(`master got msg from pid ${pid}: ${JSON.stringify(payload)}`);
     const identity = this.getIdentityString(payload.grainReference, payload.key);
     switch (payload.msg) {
       case Messages.GET_ACTIVATION: {
@@ -99,6 +108,10 @@ class SiloMasterRuntime extends SiloRuntime {
         // resolve the pending promise for this message uuid
         // TODO check that pid exists and throw exception
         this.promises[payload.uuid].resolve(payload.result);
+        break;
+      }
+      case Messages.DEACTIVATED: {
+        this.grainActivations[payload.identity] = undefined;
         break;
       }
       default:

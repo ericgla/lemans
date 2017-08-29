@@ -7,7 +7,7 @@ const cluster = require('cluster');
 
 (async () => {
   const silo = new Silo({
-    maxWorkers: 2,
+    maxWorkers: 1,
     grains
   });
 
@@ -18,12 +18,8 @@ const cluster = require('cluster');
       const grain1 = await GrainFactory.getGrain('HelloGrain', 1);
       const result = await grain1.sayHello('test');
       console.log(result);
-
-      const grain2 = await GrainFactory.getGrain('HelloGrain', 2);
-      const result2 = await grain2.sayHello('test');
-      console.log(result2);
     } catch (e) {
-      console.log(`ERROR ${JSON.stringify(e)}`);
+      console.log(`ERROR ${e}`);
     }
   }
 })();

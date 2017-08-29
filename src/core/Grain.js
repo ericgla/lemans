@@ -1,10 +1,19 @@
 class Grain {
-  constructor(key) {
+  constructor(key, identity, runtime) {
     this.key = key;
+    this.identity = identity;
+    this.runtime = runtime;
   }
 
-  get getPrimaryKey() {
-    return this.key;
+  async onActivate() {
+  }
+
+  async onDeactivate() {
+    this.runtime.deactivate(this.identity);
+  }
+
+  async deactivateOnIdle() {
+    this.runtime.queueEndActivation(this.identity);
   }
 }
 
