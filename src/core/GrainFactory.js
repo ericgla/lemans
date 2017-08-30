@@ -1,12 +1,12 @@
-let _silo = null;
+let _runtime;
 
 class GrainFactory {
-  constructor(silo) {
-    _silo = silo;
+  constructor(runtime) {
+    _runtime = runtime;
   }
 
   static async getGrain(grainReference, key) {
-    return _silo.getGrainActivation(grainReference, key);
+    return _runtime.getGrainActivation(grainReference, key);
   }
 }
 

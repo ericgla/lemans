@@ -17,7 +17,7 @@ class Grain {
   }
 
   get GrainFactory() {
-    return this.runtime.grainFactory;
+    return this.runtime._grainFactory;
   }
 }
 

@@ -1,32 +1,36 @@
 const winston = require('winston');
 const Queue = require('./Queue');
 const Grain = require('./Grain');
-const cluster = require('cluster');
 
 const buildRemoteGrainProxy = (grainReference, grainClass, runtime) => {
-  winston.info(`creating forwarding proxy for grain ${grainReference}`);
 
   function GrainProxy(key, identity, pid) {
-    this.location = 'remote';
-    this.key = key;
-    this.identity = identity;
-    this.runtime = runtime;
-    this.pid = pid;
-  }
-  GrainProxy.prototype.getPid = () => this.pid;
-  GrainProxy.prototype.getLocation = () => this.location;
+    this._location = 'remote';
+    this._key = key;
+    this._identity = identity;
+    this._runtime = runtime;
+    this._pid = pid;
+  };
+
+  GrainProxy.prototype.getPid = function() {
+    return this._pid;
+  };
+
+  GrainProxy.prototype.getLocation = function() {
+    return this._location;
+  };
 
   Object.getOwnPropertyNames(grainClass.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.debug(`creating proxy for method ${method}`);
+      winston.debug(`pid ${process.pid} building remote proxy for grain ${grainReference} method ${method}`);
 
       GrainProxy.prototype[method] = async function (...args) {
         // forward the call to the worker containing the activation,
         // return a promise to the caller
-        return this.runtime.invoke({
+        return this._runtime.invoke({
           grainReference,
-          key: this.key,
-          pid: this.pid,
+          key: this._key,
+          pid: this._pid,
           method,
           args
         });
@@ -37,28 +41,24 @@ const buildRemoteGrainProxy = (grainReference, grainClass, runtime) => {
 }
 
 const buildLocalGrainProxy = (grainReference, GrainClass, runtime) => {
-  winston.info(`creating worker proxy for grain ${grainReference}`);
 
   function GrainProxy(key, identity) {
-    this.location = 'local';
-    this.key = key;
-    this.identity = identity;
-    this.runtime = runtime;
-    this.grain = new GrainClass(key, identity, runtime);
-    this.methodQueue = new Queue();
-    this.processing = false;
+    this._location = 'local';
+    this._key = key;
+    this._identity = identity;
+    this._runtime = runtime;
+    this._grain = new GrainClass(key, identity, runtime);
+    this._methodQueue = new Queue();
+    this._processing = false;
 
-    GrainProxy.prototype.getLocation = () => this.location;
-
-    this.enqueueGrainMethod = async(method, args) => {
-      winston.info(`enqueue key ${key} method ${method} size ${this.methodQueue.size}`);
+    this.enqueueGrainMethod = async (method, args) => {
+      winston.debug(`pid ${process.pid} enqueue method ${method} for identity ${this._identity}`);
       return new Promise((resolve, reject) => {
         // queue the grain call for later execution
-        this.methodQueue.enqueue(
+        this._methodQueue.enqueue(
           async () => {
             try {
-              winston.info(`calling method key ${key} method ${method}`);
-              const result = await this.grain[method](...args);
+              const result = await this._grain[method](...args);
               resolve(result);
             } catch (err) {
               // forward the error to the caller
@@ -66,22 +66,26 @@ const buildLocalGrainProxy = (grainReference, GrainClass, runtime) => {
             }
           }
         );
-        if (!this.processing) {
+        if (!this._processing) {
           // start processing any queued grain calls
-          this.processing = true;
+          this._processing = true;
           setTimeout(this.processQueueItem, 1);
         }
       });
     };
 
+    GrainProxy.prototype.getLocation = function() {
+      return this._location;
+    };
+
     this.processQueueItem = async () => {
-      if (this.methodQueue.size > 0) {
-        winston.info(`dequeue key ${key} size ${this.methodQueue.size}`);
-        const fn = this.methodQueue.dequeue();
+      if (this._methodQueue.size > 0) {
+        const fn = this._methodQueue.dequeue();
+        winston.debug(`pid ${process.pid} dequeue method for identity ${this._identity}`);
         await fn();
         await this.processQueueItem();
       } else {
-        this.processing = false;
+        this._processing = false;
       }
     };
   }
@@ -92,7 +96,7 @@ const buildLocalGrainProxy = (grainReference, GrainClass, runtime) => {
    */
   Object.getOwnPropertyNames(Grain.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.info(`creating proxy for ${method}`);
+      winston.debug(`pid ${process.pid} building local proxy for grain ${grainReference} ${method}`);
 
       GrainProxy.prototype[method] = function (...args) {
         // the call to the grain method is will be queued for later execution,
@@ -103,7 +107,7 @@ const buildLocalGrainProxy = (grainReference, GrainClass, runtime) => {
 
   Object.getOwnPropertyNames(GrainClass.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.info(`${GrainProxy.prototype[method] === undefined ? 'creating' : 'overriding'} proxy for ${method}`);
+      winston.debug(`pid ${process.pid} ${GrainProxy.prototype[method] === undefined ? 'building' : 'overriding'} local proxy for grain ${grainReference} ${method}`);
 
       GrainProxy.prototype[method] = function (...args) {
         // the call to the grain method is will be queued for later execution,
@@ -114,7 +118,7 @@ const buildLocalGrainProxy = (grainReference, GrainClass, runtime) => {
   return GrainProxy;
 };
 
-const buildLocalGrainProxies = (grains, runtime) => {
+module.exports.createLocal = (grains, runtime) => {
   const proxies = [];
 
   Object.entries(grains).forEach(([grainReference, grain]) => {
@@ -127,7 +131,7 @@ const buildLocalGrainProxies = (grains, runtime) => {
   return proxies;
 };
 
-const buildRemoteGrainProxies = (grains, runtime) => {
+module.exports.createRemote = (grains, runtime) => {
   const proxies = [];
 
   Object.entries(grains).forEach(([grainReference, grain]) => {
@@ -138,9 +142,4 @@ const buildRemoteGrainProxies = (grains, runtime) => {
     }
   });
   return proxies;
-};
-
-module.exports = {
-  createLocal: buildLocalGrainProxies,
-  createRemote: buildRemoteGrainProxies
 };

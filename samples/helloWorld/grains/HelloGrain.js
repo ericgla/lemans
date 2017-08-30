@@ -1,4 +1,4 @@
-const {Grain} = require('../../../src');
+const Grain = require('../../../src/core/Grain');
 const winston = require('winston');
 
 class HelloGrain extends Grain {
@@ -16,7 +16,8 @@ class HelloGrain extends Grain {
 
   async echo(m) {
     this.count += 1;
-    return `HelloGrain pid ${process.pid} key ${this.key} count ${this.count} ${m}`;
+    winston.info(`HelloGrain running on pid ${process.pid} key ${this.key} count ${this.count}`);
+    return `HelloGrain: ${m}`;
   }
 }
 

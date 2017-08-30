@@ -1,22 +1,27 @@
-const cluster = require('cluster');
 const uuidv4 = require('uuid/v4');
 
 class SiloRuntime {
   constructor() {
-    this.promises = [];
+    this.promises = new Map();
   }
 
   addPromise(resolve, reject) {
     const uuid = uuidv4();
-    this.promises[uuid] = { resolve, reject };
+    this.promises.set(uuid, { resolve, reject });
     return uuid;
   }
 
+  hasPromise(uuid) {
+    return this.promises.has(uuid);
+  }
+
   getPromise(uuid) {
-    if (this.promises[uuid] === undefined) {
+    if (!this.promises.has(uuid)) {
       throw new Error(`cannot find promise for uuid ${uuid}`);
     }
-    return this.promises[uuid];
+    const p = this.promises.get(uuid);
+    this.promises.delete(uuid);
+    return p;
   }
 
   getIdentityString(grainReference, key) {

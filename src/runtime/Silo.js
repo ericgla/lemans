@@ -1,31 +1,24 @@
 const assert = require('assert');
 const winston = require('winston');
-const Grain = require('../core/Grain');
-const GrainProxyFactory = require('../core/GrainProxyFactory');
-const GrainFactory = require('../core/GrainFactory.js');
 const SiloMasterRuntime = require('./SiloMasterRuntime');
 const SiloWorkerRuntime = require('./SiloWorkerRuntime');
 const cluster = require('cluster');
 
-class Silo {
+module.exports = class Silo {
   constructor(config) {
     assert(config instanceof Object);
     assert(config.grains instanceof Object);
+    winston.level = config.logLevel;
 
-    this.config = config;
+    this._config = config;
   }
 
   async start() {
-    this.runtime = cluster.isMaster ? new SiloMasterRuntime(this.config) : new SiloWorkerRuntime(this.config);
+    this.runtime = cluster.isMaster ? new SiloMasterRuntime(this._config) : new SiloWorkerRuntime(this._config);
     await this.runtime.start();
   }
 
   get isMaster() {
     return cluster.isMaster;
   }
-
-  async getGrainActivation(grainReference, key) {
-    return this.runtime.getGrainActivation(grainReference, key);
-  }
 }
-module.exports = Silo;
