@@ -1,12 +1,19 @@
 const Silo = require('../../src/runtime/Silo');
 const grains = require('./grains');
 const GrainFactory = require('../../src/core/GrainFactory');
+const MemoryStorage = require('../../src/providers/MemoryStorage');
 
 (async () => {
   const silo = new Silo({
     maxWorkers: 8,
-    logLevel: 'info',
-    grains
+    logLevel: 'debug',
+    grains,
+    storageProviders: {
+      memoryStorage: MemoryStorage
+    },
+    streamProviders: {
+
+    }
   });
 
   await silo.start();

@@ -1,23 +1,14 @@
-class Grain {
-  constructor(key, identity, runtime) {
-    this.key = key;
-    this.identity = identity;
-    this.runtime = runtime;
-  }
+const BaseGrain = require('./BaseGrain');
 
-  async onActivate() {
-  }
+/*
+ * base class for user created grains.  Proxy methods will be created for all
+ * methods on Grain and it's subclass
+ */
+class Grain extends BaseGrain {
+  async onActivate() {}
 
   async onDeactivate() {
     this.runtime.deactivate(this.identity);
-  }
-
-  async deactivateOnIdle() {
-    this.runtime.queueEndActivation(this.identity);
-  }
-
-  get GrainFactory() {
-    return this.runtime._grainFactory;
   }
 }
 
