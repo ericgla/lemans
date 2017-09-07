@@ -1,9 +1,9 @@
 const winston = require('winston');
 const Grain = require('./Grain');
 
-const createGrainProxy = (grainReference, grainClass, runtime) => {
+const createGrainActivation = (grainReference, grainClass, runtime) => {
 
-  function GrainProxy(key, identity) {
+  function GrainActivation(key, identity) {
     this._key = key;
     this._identity = identity;
     this._runtime = runtime;
@@ -16,9 +16,9 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
    */
   Object.getOwnPropertyNames(Grain.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.debug(`pid ${process.pid} building worker proxy for grain ${grainReference} ${method}`);
+      winston.debug(`pid ${process.pid} building worker proxy for grain base ${grainReference} ${method}`);
 
-      GrainProxy.prototype[method] = function (...args) {
+      GrainActivation.prototype[method] = function (...args) {
         return this._runtime.invoke({
           grainReference,
           key: this._key,
@@ -31,9 +31,9 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
 
   Object.getOwnPropertyNames(grainClass.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.debug(`pid ${process.pid} ${!GrainProxy.prototype[method] ? 'building' : 'overriding'} worker proxy for grain ${grainReference} ${method}`);
+      winston.debug(`pid ${process.pid} building worker proxy for grain ${grainReference} ${method}`);
 
-      GrainProxy.prototype[method] = function (...args) {
+      GrainActivation.prototype[method] = function (...args) {
         return this._runtime.invoke({
           grainReference,
           key: this._key,
@@ -43,7 +43,7 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
       };
     }
   });
-  return GrainProxy;
+  return GrainActivation;
 }
 
 module.exports.create = (grains, runtime) => {
@@ -51,7 +51,7 @@ module.exports.create = (grains, runtime) => {
 
   Object.entries(grains).forEach(([grainReference, grain]) => {
     if (grain.prototype instanceof Grain) {
-      proxies[grainReference] = createGrainProxy(grainReference, grain, runtime);
+      proxies[grainReference] = createGrainActivation(grainReference, grain, runtime);
     } else {
       throw new Error(`grain reference ${grainReference} does not inherit from Grain`);
     }

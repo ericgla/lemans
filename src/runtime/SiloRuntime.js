@@ -5,7 +5,7 @@ class SiloRuntime {
     this.promises = new Map();
   }
 
-  addPromise(resolve, reject) {
+  setDeferredPromise(resolve, reject) {
     const uuid = uuidv4();
     this.promises.set(uuid, { resolve, reject });
     return uuid;
@@ -15,7 +15,7 @@ class SiloRuntime {
     return this.promises.has(uuid);
   }
 
-  getPromise(uuid) {
+  getDeferredPromise(uuid) {
     if (!this.promises.has(uuid)) {
       throw new Error(`cannot find promise for uuid ${uuid}`);
     }

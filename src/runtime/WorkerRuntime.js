@@ -1,4 +1,4 @@
-const WorkerProxyFactory = require('../core/WorkerProxyFactory');
+const WorkerProxyFactory = require('../core/GrainActivationFactory');
 const GrainFactory = require('../core/GrainFactory.js');
 const cluster = require('cluster');
 const SiloRuntime = require('./SiloRuntime');
@@ -74,7 +74,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
 
   async invoke({ grainReference, key, method, args }) {
     return new Promise(async (resolve, reject) => {
-      const uuid = this.addPromise(resolve, reject);
+      const uuid = this.setDeferredPromise(resolve, reject);
       cluster.worker.send({
         msg: Messages.INVOKE,
         pid: process.pid,
@@ -125,12 +125,12 @@ module.exports = class WorkerRuntime extends SiloRuntime {
       case Messages.ACTIVATED:
         const proxy = new this._grainProxies[payload.grainReference](payload.key, identity);
         this._grainActivations.set(identity, proxy);
-        this.getPromise(payload.uuid).resolve(proxy);
+        this.getDeferredPromise(payload.uuid).resolve(proxy);
         break;
 
       case Messages.ACTIVATION_ERROR:
         // reject the pending promise for this message uuid
-        this.getPromise(payload.uuid).reject(payload.error);
+        this.getDeferredPromise(payload.uuid).reject(payload.error);
         break;
 
       case Messages.INVOKE:
@@ -141,7 +141,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
 
       case Messages.INVOKE_RESULT:
         // resolve the pending promise for this message uuid
-        this.getPromise(payload.uuid).resolve(payload.result);
+        this.getDeferredPromise(payload.uuid).resolve(payload.result);
         break;
 
       default:
@@ -151,7 +151,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
 
   async _getRemoteGrainActivation(grainReference, key) {
     return new Promise((resolve, reject) => {
-      const uuid = this.addPromise(resolve, reject);
+      const uuid = this.setDeferredPromise(resolve, reject);
       winston.debug(`pid ${process.pid} sending getGrainActivation uuid ${uuid}`);
       cluster.worker.send({
         msg: Messages.GET_ACTIVATION,

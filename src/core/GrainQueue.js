@@ -1,5 +1,5 @@
 const winston = require('winston');
-const Queue = require('./Queue');
+const Queue = require('../util/Queue');
 
 module.exports = class GrainQueue {
 

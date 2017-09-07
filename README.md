@@ -7,3 +7,33 @@ LeMans was inspired by the fine work of [Microsoft Research](https://www.microso
 [Orleans](http://dotnet.github.io/orleans/index.html) for the .NET framework.  LeMans shares many of the same concepts and syntax as Orleans, but has a much different implementation
 due to the single-threaded nature of node and the use of isolated worker processes.
 
+Basic Example
+
+```javascript
+const Silo = require('../../src/runtime/Silo');
+const Grain = require('../../src/core/Grain');
+const GrainFactory = require('../../src/core/GrainFactory');
+
+(async () => {
+  const silo = new Silo({
+    grains: {
+      HelloGrain: class extends Grain {
+        async sayHello() {
+          return `Hello from HelloGrain with key ${this.key}`;
+        }
+      }
+    }
+  });
+
+  await silo.start();
+
+  if (silo.isWorker) {
+    try {
+      const grain = await GrainFactory.getGrain('HelloGrain', 1);
+      console.log(await grain.sayHello());
+    } catch (e) {
+      console.error(e);
+    }
+  }
+})();
+```

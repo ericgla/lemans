@@ -1,19 +1,16 @@
-const assert = require('assert');
 const winston = require('winston');
 const MasterRuntime = require('./MasterRuntime');
 const WorkerRuntime = require('./WorkerRuntime');
 const Storage = require('../providers/Storage');
 const Stream = require('../providers/Stream');
 const cluster = require('cluster');
+const Config = require('../config/Config');
 
 module.exports = class Silo {
 
   constructor(config) {
-    assert(config instanceof Object);
-    assert(config.grains instanceof Object);
-    winston.level = config.logLevel;
-
-    this._config = config;
+    this._config = Config.create(config);
+    winston.level = this._config.logLevel;
     this._modules = [];
   }
 
@@ -39,4 +36,9 @@ module.exports = class Silo {
   get isMaster() {
     return cluster.isMaster;
   }
+
+  get isWorker() {
+    return cluster.isWorker;
+  }
+
 }

@@ -22,9 +22,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
     super();
     this._config = config;
     this._grainQueueMap = new Map();
-    this._pending = new Map();
     this._grainFactory = new GrainFactory(this);
-    this._nextWorkerIndex = 1;
   }
 
   /*
@@ -32,7 +30,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
    */
   async start() {
     return new Promise(async (resolve) => {
-      this.numWorkers = this._config.maxWorkers || os.cpus().length;
+      this.numWorkers = this._config.maxWorkers;
       winston.info(`pid ${process.pid} starting silo master runtime with ${this.numWorkers} workers`);
       let onlineWorkers = 0;
 
@@ -56,7 +54,6 @@ module.exports = class MasterRuntime extends SiloRuntime {
             if (this.numWorkers === onlineWorkers) {
               winston.info(`pid ${process.pid} all ${onlineWorkers} workers ready.`);
               Object.keys(cluster.workers).forEach((key) => {
-
                 cluster.workers[key].send({ msg: Messages.MASTER_READY });
               });
               resolve();
@@ -64,6 +61,9 @@ module.exports = class MasterRuntime extends SiloRuntime {
           }
         });
       });
+      cluster.on('disconnect', () => { winston.error('worker disconnect'); });
+      cluster.on('exit', () => { winston.error('worker exit'); });
+      cluster.on('error', () => { winston.error('worker error'); });
     });
   }
 
@@ -75,7 +75,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
     const identity = this.getIdentityString(grainReference, key);
 
     return new Promise(async (resolve, reject) => {
-      const uuid = this.addPromise(resolve, reject);
+      const uuid = this.setDeferredPromise(resolve, reject);
       const pid = this._grainQueueMap.get(identity).getPid();
       const workerIndex = getWorkerByPid(pid);
       cluster.workers[workerIndex].send({
@@ -112,14 +112,14 @@ module.exports = class MasterRuntime extends SiloRuntime {
       this._grainQueueMap.set(identity, grainQueue);
       grainQueue.add(async () => {
         return new Promise( (resolve, reject) => {
-          const uuid2 = this.addPromise(() => {
+          const uuid = this.setDeferredPromise(() => {
             cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATED}));
             resolve();
           }, (error) => {
             cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATION_ERROR, error }));
             reject(error);
           });
-          const msg = Object.assign({}, payload, { msg: Messages.CREATE_ACTIVATION, uuid: uuid2 });
+          const msg = Object.assign({}, payload, { msg: Messages.CREATE_ACTIVATION, uuid });
           cluster.workers[workerIndex].send(msg);
         })
       }, 'activation');
@@ -130,7 +130,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
     const grainQueue = this._grainQueueMap.get(identity);
     grainQueue.add(async () => {
       return new Promise( (resolve, reject) => {
-        const uuid2 = this.addPromise((result) => {
+        const uuid = this.setDeferredPromise((result) => {
           cluster.workers[getWorkerByPid(pid)].send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
           resolve();
         }, (error) => {
@@ -138,7 +138,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
           reject(error);
         });
         const activationPid = this._grainQueueMap.get(identity).pid;
-        cluster.workers[getWorkerByPid(activationPid)].send(Object.assign({}, payload, { uuid: uuid2 }));
+        cluster.workers[getWorkerByPid(activationPid)].send(Object.assign({}, payload, { uuid }));
       });
     }, `invoke ${payload.method}`);
     this._grainQueueMap.set(identity, grainQueue);
@@ -154,11 +154,11 @@ module.exports = class MasterRuntime extends SiloRuntime {
 
       case Messages.CREATED:
         this._grainQueueMap.get(identity).pid = pid;
-        this.getPromise(payload.uuid).resolve();
+        this.getDeferredPromise(payload.uuid).resolve();
         break;
 
       case Messages.ACTIVATION_ERROR:
-        this.getPromise(payload.uuid).reject(payload.error);
+        this.getDeferredPromise(payload.uuid).reject(payload.error);
         break;
 
       case Messages.INVOKE:
@@ -166,11 +166,11 @@ module.exports = class MasterRuntime extends SiloRuntime {
         break;
 
       case Messages.INVOKE_RESULT:
-        this.getPromise(payload.uuid).resolve(payload.result);
+        this.getDeferredPromise(payload.uuid).resolve(payload.result);
         break;
 
       case Messages.INVOKE_ERROR:
-        this.getPromise(payload.uuid).reject(payload.error);
+        this.getDeferredPromise(payload.uuid).reject(payload.error);
         break;
 
       case Messages.DEACTIVATED:

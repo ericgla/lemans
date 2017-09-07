@@ -4,6 +4,7 @@ const GrainFactory = require('../../src/core/GrainFactory');
 const MemoryStorage = require('../../src/providers/MemoryStorage');
 const cluster = require('cluster');
 const moment = require('moment');
+const winston = require('winston');
 
 const iterations = 1000;
 
@@ -34,14 +35,7 @@ const invokeGrains = async (grainRefs) => {
 (async () => {
   const silo = new Silo({
     maxWorkers: 8,
-    logLevel: '',
-    grains,
-    storageProviders: {
-      memoryStorage: MemoryStorage
-    },
-    streamProviders: {
-
-    }
+    logLevel: 'warn'
   });
 
   await silo.start();
@@ -49,7 +43,6 @@ const invokeGrains = async (grainRefs) => {
     try {
       const grainRefs = await createGrains();
       await invokeGrains(grainRefs);
-
     } catch (e) {
       console.error(e);
     }
