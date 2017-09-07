@@ -1,4 +1,4 @@
-# LeMans: Virtual actor framework for [node](http://nodejs.org) 
+# LeMans: Virtual actor framework for node.js
 
 LeMans is a framework to writing distributed systems using virtual actors in JavaScript. 
 It allows developers to write scalable applications while simplifying concurrency, state management and actor lifetime.
