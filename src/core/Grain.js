@@ -5,11 +5,13 @@ const BaseGrain = require('./BaseGrain');
  * methods on Grain and it's subclass
  */
 class Grain extends BaseGrain {
+
   async onActivate() {}
 
   async onDeactivate() {
     this.runtime.deactivate(this.identity);
   }
+
 }
 
 module.exports = Grain;

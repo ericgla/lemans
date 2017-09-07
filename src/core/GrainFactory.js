@@ -1,6 +1,7 @@
 let _runtime;
 
-class GrainFactory {
+module.exports = class GrainFactory {
+
   constructor(runtime) {
     _runtime = runtime;
   }
@@ -9,5 +10,3 @@ class GrainFactory {
     return _runtime.getGrainActivation(grainReference, key);
   }
 }
-
-module.exports = GrainFactory;

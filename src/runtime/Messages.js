@@ -1,8 +1,12 @@
 module.exports = {
-  READY: 'ready',
+  WORKER_READY: 'workerReady',
+  MASTER_READY: 'masterReady',
   GET_ACTIVATION: 'getActivation',
   ACTIVATED: 'activated',
   ACTIVATION_ERROR: 'activationError',
+  CREATE_ACTIVATION: 'createActivation',
+  CREATED: 'created',
+  CREATE_ERROR: 'createError',
   DEACTIVATED: 'deactivated',
   DEACTIVATED_ERROR: 'deactivatedError',
   INVOKE: 'invoke',

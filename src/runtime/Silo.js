@@ -1,12 +1,13 @@
 const assert = require('assert');
 const winston = require('winston');
-const SiloMasterRuntime = require('./SiloMasterRuntime');
-const SiloWorkerRuntime = require('./SiloWorkerRuntime');
+const MasterRuntime = require('./MasterRuntime');
+const WorkerRuntime = require('./WorkerRuntime');
 const Storage = require('../providers/Storage');
 const Stream = require('../providers/Stream');
 const cluster = require('cluster');
 
 module.exports = class Silo {
+
   constructor(config) {
     assert(config instanceof Object);
     assert(config.grains instanceof Object);
@@ -27,7 +28,11 @@ module.exports = class Silo {
   }
 
   async start() {
-    this.runtime = cluster.isMaster ? new SiloMasterRuntime(this._config, this._modules) : new SiloWorkerRuntime(this._config, this._modules);
+    if (cluster.isMaster) {
+      this.runtime = new MasterRuntime(this._config, this._modules);
+    } else {
+      this.runtime = new WorkerRuntime(this._config, this._modules);
+    }
     await this.runtime.start();
   }
 
