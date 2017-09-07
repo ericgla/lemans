@@ -23,6 +23,9 @@ module.exports = class MasterRuntime extends SiloRuntime {
     this._config = config;
     this._grainQueueMap = new Map();
     this._grainFactory = new GrainFactory(this);
+    process.on('unhandledRejection', (reason, p) => {
+      winston.error('Unhandled Rejection at: Promise', p, 'reason:', reason);
+    });
   }
 
   /*
@@ -109,39 +112,51 @@ module.exports = class MasterRuntime extends SiloRuntime {
     } else {
       const workerIndex = this._getNextWorkerIndex();
       const grainQueue = new GrainQueue(identity, this, cluster.workers[workerIndex].process.pid);
-      this._grainQueueMap.set(identity, grainQueue);
-      grainQueue.add(async () => {
-        return new Promise( (resolve, reject) => {
-          const uuid = this.setDeferredPromise(() => {
+
+      grainQueue.add(async () => new Promise((resolve, reject) => {
+        const uuid = this.setDeferredPromise(
+          () => {
             cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATED}));
             resolve();
-          }, (error) => {
+          },
+          (error) => {
             cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATION_ERROR, error }));
             reject(error);
-          });
-          const msg = Object.assign({}, payload, { msg: Messages.CREATE_ACTIVATION, uuid });
-          cluster.workers[workerIndex].send(msg);
-        })
-      }, 'activation');
+          },
+          this._config.grainActivateTimeout * 1000,
+          `timeout on activation for identity ${identity}`
+        );
+
+        // send a create activation message to the next worker, and change the response uuid
+        // so that the deferred promise can be resolved when the worker responds
+        const msg = Object.assign({}, payload, { msg: Messages.CREATE_ACTIVATION, uuid });
+        cluster.workers[workerIndex].send(msg);
+      }));
+      this._grainQueueMap.set(identity, grainQueue);
     }
   }
 
   _queueInvoke(pid, identity, payload) {
     const grainQueue = this._grainQueueMap.get(identity);
-    grainQueue.add(async () => {
-      return new Promise( (resolve, reject) => {
-        const uuid = this.setDeferredPromise((result) => {
+
+    grainQueue.add(async () => new Promise( (resolve, reject) => {
+      const uuid = this.setDeferredPromise(
+        (result) => {
           cluster.workers[getWorkerByPid(pid)].send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
           resolve();
-        }, (error) => {
+        },
+        (error) => {
           cluster.workers[getWorkerByPid(pid)].send(Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
           reject(error);
-        });
-        const activationPid = this._grainQueueMap.get(identity).pid;
-        cluster.workers[getWorkerByPid(activationPid)].send(Object.assign({}, payload, { uuid }));
-      });
-    }, `invoke ${payload.method}`);
-    this._grainQueueMap.set(identity, grainQueue);
+        },
+        this._config.grainInvokeTimeout * 1000,
+        `timeout on invoke for identity ${identity} method ${payload.method}`
+      );
+      // forward the invoke message to the worker containing the grain, and change the response uuid
+      // so that the deferred promise can be resolved when the worker responds
+      const activationPid = this._grainQueueMap.get(identity).activationPid;
+      cluster.workers[getWorkerByPid(activationPid)].send(Object.assign({}, payload, { uuid }));
+    }));
   }
 
   async _processIncomingMessage(payload, pid) {

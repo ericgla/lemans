@@ -2,25 +2,39 @@ const uuidv4 = require('uuid/v4');
 
 class SiloRuntime {
   constructor() {
-    this.promises = new Map();
+    this.deferred = new Map();
   }
 
-  setDeferredPromise(resolve, reject) {
+  setDeferredPromise(resolve, reject, timeout, timeoutMessage) {
     const uuid = uuidv4();
-    this.promises.set(uuid, { resolve, reject });
+    if (timeout) {
+      const timeoutHandle = setTimeout(() => {
+        reject(timeoutMessage);
+        // prevent the response from sending a message if we already timed out.
+        this.deferred.delete(uuid);
+        this.deferred.set(uuid, { resolve: () => {}, reject: () => {} });
+      }, timeout);
+      this.deferred.set(uuid, {resolve, reject, timeoutHandle });
+    }
+    else {
+      this.deferred.set(uuid, {resolve, reject });
+    }
     return uuid;
   }
 
   hasPromise(uuid) {
-    return this.promises.has(uuid);
+    return this.deferred.has(uuid);
   }
 
   getDeferredPromise(uuid) {
-    if (!this.promises.has(uuid)) {
+    if (!this.deferred.has(uuid)) {
       throw new Error(`cannot find promise for uuid ${uuid}`);
     }
-    const p = this.promises.get(uuid);
-    this.promises.delete(uuid);
+    const p = this.deferred.get(uuid);
+    if (p.timeoutHandle) {
+      clearTimeout(p.timeoutHandle);
+    }
+    this.deferred.delete(uuid);
     return p;
   }
 

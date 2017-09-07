@@ -1,7 +1,6 @@
 const Silo = require('../../src/runtime/Silo');
 const grains = require('./grains');
 const GrainFactory = require('../../src/core/GrainFactory');
-const MemoryStorage = require('../../src/providers/MemoryStorage');
 const cluster = require('cluster');
 const moment = require('moment');
 const winston = require('winston');
@@ -35,7 +34,8 @@ const invokeGrains = async (grainRefs) => {
 (async () => {
   const silo = new Silo({
     maxWorkers: 8,
-    logLevel: 'warn'
+    logLevel: 'warn',
+    grains
   });
 
   await silo.start();

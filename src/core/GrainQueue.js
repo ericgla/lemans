@@ -16,7 +16,7 @@ module.exports = class GrainQueue {
   }
 
   async add(fn, action) {
-    winston.debug(`master enqueue action ${action} for identity ${this._identity}`);
+    winston.debug(`master enqueue for identity ${this._identity}`);
 
     this._methodQueue.enqueue({
       fn,
@@ -33,8 +33,10 @@ module.exports = class GrainQueue {
   async _processQueueItem() {
     if (this._methodQueue.size > 0) {
       const item = this._methodQueue.dequeue();
-      winston.debug(`pid ${process.pid} dequeue action ${item.action} for identity ${this._identity}`);
-      await item.fn();
+      winston.debug(`pid ${process.pid} dqeueue for identity ${this._identity}`);
+      try {
+        await item.fn();
+      } catch (e) {} // swallow the error here since the reject handler will have already been called to forward the error
       await this._processQueueItem();
     } else {
       this._processing = false;

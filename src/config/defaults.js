@@ -1,7 +1,8 @@
 module.exports = {
   maxWorkers: 1,
   logLevel: 'warn',
-  grainMethodTimeoutSeconds: 10,
-  grainDeactivateOnIdleSeconds: 30,
+  grainActivateTimeout: 10,
+  grainInvokeTimeout: 10,
+  grainDeactivateOnIdle: 30,
   grains: {}
 }

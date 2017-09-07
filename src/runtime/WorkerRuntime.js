@@ -135,13 +135,21 @@ module.exports = class WorkerRuntime extends SiloRuntime {
 
       case Messages.INVOKE:
         const grain = await this._localGrainMap.get(identity);
-        const result = await grain[payload.method](...payload.args);
-        cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
+        try {
+          const result = await grain[payload.method](...payload.args);
+          cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
+        } catch (e) {
+          const error = serializeError(e);
+          cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
+        }
         break;
 
       case Messages.INVOKE_RESULT:
-        // resolve the pending promise for this message uuid
         this.getDeferredPromise(payload.uuid).resolve(payload.result);
+        break;
+
+      case Messages.INVOKE_ERROR:
+        this.getDeferredPromise(payload.uuid).reject(payload.error);
         break;
 
       default:
