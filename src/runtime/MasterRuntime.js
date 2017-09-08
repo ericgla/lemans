@@ -1,7 +1,6 @@
 const GrainQueue = require('../core/GrainQueue');
 const GrainFactory = require('../core/GrainFactory.js');
 const cluster = require('cluster');
-const os = require('os');
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
 const winston = require('winston');
@@ -92,13 +91,16 @@ module.exports = class MasterRuntime extends SiloRuntime {
     });
   }
 
+  async getGrainActivation() {
+    throw new Error('access to grain activations can only be made on workers.  Use silo.isWorker to check if you are on a worker.');
+  }
   /*
    * private
    */
 
   /**
    * gets the index of the worker to send the task to.
-   * for now it's simply round robin, but should be expanded to take other metrics into account
+   * for now it's simply random, but should be expanded to take other metrics into account
    * such as # of activations on the worker, worker busy time, etc
    */
   _getNextWorkerIndex() {
@@ -163,6 +165,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
     winston.debug(`master got msg from pid ${pid}: ${JSON.stringify(payload)}`);
     const identity = this.getIdentityString(payload.grainReference, payload.key);
     switch (payload.msg) {
+
       case Messages.GET_ACTIVATION:
         await this._queueGetActivation(pid, identity, Object.assign({}, payload));
         break;
@@ -196,4 +199,5 @@ module.exports = class MasterRuntime extends SiloRuntime {
         break;
     }
   }
+
 }

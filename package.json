@@ -1,6 +1,6 @@
 {
   "name": "lemans",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Virtual actor for node.js",
   "main": "index.js",
   "license": "MIT",

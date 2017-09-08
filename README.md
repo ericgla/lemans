@@ -12,12 +12,12 @@ Basic Example
 `npm install --save lemans`
 
 ```javascript
-const Lemans = require('lemans');
+const { Silo, GrainFactory, Grain } = require('lemans');
 
 (async () => {
-  const silo = new Lemans.Silo({
+  const silo = new Silo({
     grains: {
-      HelloGrain: class extends Lemans.Grain {
+      HelloGrain: class extends Grain {
         async sayHello() {
           return `Hello from HelloGrain with key ${this.key}`;
         }
@@ -29,7 +29,7 @@ const Lemans = require('lemans');
 
   if (silo.isWorker) {
     try {
-      const grain = await Lemans.GrainFactory.getGrain('HelloGrain', 1);
+      const grain = await GrainFactory.getGrain('HelloGrain', 'someGrainKey');
       console.log(await grain.sayHello());
     } catch (e) {
       console.error(e);
