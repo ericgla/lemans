@@ -34,7 +34,7 @@ const invokeGrains = async (grainRefs) => {
 (async () => {
   const silo = new Silo({
     maxWorkers: 8,
-    logLevel: 'warn',
+    logLevel: 'info',
     grains
   });
 

@@ -9,7 +9,6 @@ module.exports = class Grain extends BaseGrain {
   async onActivate() {}
 
   async onDeactivate() {
-    this.runtime.deactivate(this.identity);
   }
 
 }

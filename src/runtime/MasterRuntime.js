@@ -1,30 +1,30 @@
-const GrainQueue = require('../core/GrainQueue');
-const GrainFactory = require('../core/GrainFactory.js');
+const { GrainActivation } = require('../core/GrainActivation');
 const cluster = require('cluster');
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
 const winston = require('winston');
-
-const getWorkerByPid = (pid) => {
-  let index;
-  Object.keys(cluster.workers).forEach((key) => {
-    if (cluster.workers[key].process.pid === pid) {
-      index = key;
-    }
-  });
-  return index;
-}
+const WorkerManager = require('./WorkerManager');
 
 module.exports = class MasterRuntime extends SiloRuntime {
 
   constructor(config) {
     super();
     this._config = config;
-    this._grainQueueMap = new Map();
-    this._grainFactory = new GrainFactory(this);
+    this._grainActivationMap = new Map();
+    this._workerManager = new WorkerManager(this);
     process.on('unhandledRejection', (reason, p) => {
-      winston.error('Unhandled Rejection at: Promise', p, 'reason:', reason);
+      winston.error('Unhandled Rejection in master runtime at: Promise', p, 'reason:', reason);
     });
+    this._deactivationHandle = setInterval(() => {
+      const now = new Date();
+      this._grainActivationMap.forEach((activation, identity) => {
+        if ((now - activation.lastActivityDate) / 1000 > this._config.grainDeactivateOnIdle) {
+          winston.info(`idle deactivating ${identity}`);
+          this._deactivate(identity);
+          this._grainActivationMap.delete(identity);
+        }
+      });
+    }, 1 * 1000);
   }
 
   /*
@@ -69,21 +69,26 @@ module.exports = class MasterRuntime extends SiloRuntime {
     });
   }
 
+  async stop() {
+    winston.info(`pid ${process.pid} stopping silo master runtime`);
+    clearInterval(this._deactivationHandle);
+    this._grainActivationMap.forEach((activation, identity) => {
+      winston.info(`idle deactivating ${identity}`);
+      this._deactivate(identity);
+      this._grainActivationMap.delete(identity);
+    });
+  }
+
   get GrainFactory() {
     return this._grainFactory;
   }
 
-  async invoke({ grainReference, key, method, args }) {
-    const identity = this.getIdentityString(grainReference, key);
-
+  async invoke({ identity, method, args }) {
     return new Promise(async (resolve, reject) => {
       const uuid = this.setDeferredPromise(resolve, reject);
-      const pid = this._grainQueueMap.get(identity).getPid();
-      const workerIndex = getWorkerByPid(pid);
-      cluster.workers[workerIndex].send({
+      this._workerManager.sendToWorker(this._grainQueueMap.get(identity).activationPid, {
         msg: Messages.INVOKE,
-        grainReference,
-        key,
+        identity,
         uuid,
         method,
         args
@@ -94,35 +99,26 @@ module.exports = class MasterRuntime extends SiloRuntime {
   async getGrainActivation() {
     throw new Error('access to grain activations can only be made on workers.  Use silo.isWorker to check if you are on a worker.');
   }
+
   /*
    * private
    */
 
-  /**
-   * gets the index of the worker to send the task to.
-   * for now it's simply random, but should be expanded to take other metrics into account
-   * such as # of activations on the worker, worker busy time, etc
-   */
-  _getNextWorkerIndex() {
-    return Math.floor(Math.random() * (this.numWorkers - 1) + 1);
-  }
-
-  async _queueGetActivation(pid, identity, payload) {
-    if (this._grainQueueMap.has(identity)) {
+  async _getActivation(pid, identity, payload) {
+    if (this._grainActivationMap.has(identity)) {
       // the grain is already active.  no need to queue since there is no actual work to do
-      cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATED }));
+      this._workerManager.sendToWorker(pid, Object.assign({}, payload, { msg: Messages.ACTIVATED }));
     } else {
-      const workerIndex = this._getNextWorkerIndex();
-      const grainQueue = new GrainQueue(identity, this, cluster.workers[workerIndex].process.pid);
+      const activation = new GrainActivation(identity, this);
 
-      grainQueue.add(async () => new Promise((resolve, reject) => {
+      activation.add(async () => new Promise((resolve, reject) => {
         const uuid = this.setDeferredPromise(
           () => {
-            cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATED}));
+            this._workerManager.sendToWorker(payload.fromPid, Object.assign({}, payload, { identity, msg: Messages.ACTIVATED}));
             resolve();
           },
           (error) => {
-            cluster.workers[getWorkerByPid(payload.fromPid)].send(Object.assign({}, payload, { msg: Messages.ACTIVATION_ERROR, error }));
+            this._workerManager.sendToWorker(payload.fromPid, Object.assign({}, payload, { identity, msg: Messages.ACTIVATION_ERROR, error }));
             reject(error);
           },
           this._config.grainActivateTimeout * 1000,
@@ -132,32 +128,53 @@ module.exports = class MasterRuntime extends SiloRuntime {
         // send a create activation message to the next worker, and change the response uuid
         // so that the deferred promise can be resolved when the worker responds
         const msg = Object.assign({}, payload, { msg: Messages.CREATE_ACTIVATION, uuid });
-        cluster.workers[workerIndex].send(msg);
+        const activationPid = this._workerManager.sendToNextAvailableWorker(msg);
+        activation.activationPid = activationPid;
       }));
-      this._grainQueueMap.set(identity, grainQueue);
+      this._grainActivationMap.set(identity, activation);
     }
   }
 
-  _queueInvoke(pid, identity, payload) {
-    const grainQueue = this._grainQueueMap.get(identity);
+  _invoke(pid, payload) {
+    const activation = this._grainActivationMap.get(payload.identity);
 
-    grainQueue.add(async () => new Promise( (resolve, reject) => {
+    activation.add(async () => new Promise((resolve, reject) => {
       const uuid = this.setDeferredPromise(
         (result) => {
-          cluster.workers[getWorkerByPid(pid)].send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
+          this._workerManager.sendToWorker(pid, Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
           resolve();
         },
         (error) => {
-          cluster.workers[getWorkerByPid(pid)].send(Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
+          this._workerManager.sendToWorker(pid, Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
           reject(error);
         },
         this._config.grainInvokeTimeout * 1000,
-        `timeout on invoke for identity ${identity} method ${payload.method}`
+        `timeout on invoke for identity ${payload.identity} method ${payload.method}`
       );
       // forward the invoke message to the worker containing the grain, and change the response uuid
       // so that the deferred promise can be resolved when the worker responds
-      const activationPid = this._grainQueueMap.get(identity).activationPid;
-      cluster.workers[getWorkerByPid(activationPid)].send(Object.assign({}, payload, { uuid }));
+      const activationPid = this._grainActivationMap.get(payload.identity).activationPid;
+      this._workerManager.sendToWorker(activationPid, Object.assign({}, payload, { uuid }));
+    }));
+  }
+
+  _deactivate(identity) {
+    const activation = this._grainActivationMap.get(identity);
+
+    activation.add(async () => new Promise((resolve, reject) => {
+      const uuid = this.setDeferredPromise(
+        () => {
+          // TODO - broadcast deactivation to all workers
+          resolve();
+        },
+        (error) => {
+          winston.error(error);
+          reject(error);
+        },
+        this._config.grainInvokeTimeout * 1000,
+        `timeout on deactivate for identity ${identity}`
+      );
+      this._workerManager.sendToWorker(activation.activationPid, { identity, msg: Messages.DEACTIVATE, uuid });
     }));
   }
 
@@ -167,11 +184,11 @@ module.exports = class MasterRuntime extends SiloRuntime {
     switch (payload.msg) {
 
       case Messages.GET_ACTIVATION:
-        await this._queueGetActivation(pid, identity, Object.assign({}, payload));
+        await this._getActivation(pid, identity, Object.assign({}, payload));
         break;
 
       case Messages.CREATED:
-        this._grainQueueMap.get(identity).pid = pid;
+        this._grainActivationMap.get(identity).activationPid = pid;
         this.getDeferredPromise(payload.uuid).resolve();
         break;
 
@@ -180,7 +197,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
         break;
 
       case Messages.INVOKE:
-        this._queueInvoke(pid, identity, payload);
+        this._invoke(pid, payload);
         break;
 
       case Messages.INVOKE_RESULT:
@@ -192,7 +209,11 @@ module.exports = class MasterRuntime extends SiloRuntime {
         break;
 
       case Messages.DEACTIVATED:
-        this._grainQueueMap.delete(payload.identity);
+        this.getDeferredPromise(payload.uuid).resolve();
+        break;
+
+      case Messages.STOP_SILO:
+        this.stop();
         break;
 
       default:

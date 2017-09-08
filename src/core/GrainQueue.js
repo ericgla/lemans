@@ -3,24 +3,20 @@ const Queue = require('../util/Queue');
 
 module.exports = class GrainQueue {
 
-  constructor(identity, runtime, pid) {
+  constructor(identity, runtime) {
     this._identity = identity;
     this._runtime = runtime;
     this._methodQueue = new Queue();
     this._processing = false;
-    this._pid = pid;
+    this._onProcessing = () => {};
   }
 
-  get activationPid() {
-    return this._pid;
-  }
-
-  async add(fn, action) {
+  async add(fn, type) {
     winston.debug(`master enqueue for identity ${this._identity}`);
 
     this._methodQueue.enqueue({
       fn,
-      action
+      type
     });
 
     if (!this._processing) {
@@ -33,6 +29,7 @@ module.exports = class GrainQueue {
   async _processQueueItem() {
     if (this._methodQueue.size > 0) {
       const item = this._methodQueue.dequeue();
+      this._onProcessing(this._methodQueue.size, item.type);
       winston.debug(`pid ${process.pid} dqeueue for identity ${this._identity}`);
       try {
         await item.fn();
@@ -40,7 +37,11 @@ module.exports = class GrainQueue {
       await this._processQueueItem();
     } else {
       this._processing = false;
+      this._onProcessing(this._methodQueue.size);
     }
   }
 
+  onProcessing(fn) {
+    this._onProcessing = fn;
+  }
 };

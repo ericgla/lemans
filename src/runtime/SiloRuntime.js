@@ -1,4 +1,4 @@
-const uuidv4 = require('uuid/v4');
+const uuidv4 = require('../util/uuid');
 
 class SiloRuntime {
   constructor() {
@@ -10,7 +10,7 @@ class SiloRuntime {
     if (timeout) {
       const timeoutHandle = setTimeout(() => {
         reject(timeoutMessage);
-        // prevent the response from sending a message if we already timed out.
+        // prevent the response from sending a message back to the requester if we already timed out.
         this.deferred.delete(uuid);
         this.deferred.set(uuid, { resolve: () => {}, reject: () => {} });
       }, timeout);

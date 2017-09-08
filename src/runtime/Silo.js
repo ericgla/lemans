@@ -41,4 +41,8 @@ module.exports = class Silo {
     return cluster.isWorker;
   }
 
+  async stop() {
+    await this.runtime.stop();
+  }
+
 }

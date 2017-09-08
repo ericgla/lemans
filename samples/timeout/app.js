@@ -8,14 +8,18 @@ const delay = async (ms) => new Promise((resolve) =>{
 
 (async () => {
   const silo = new Silo({
-    grainInvokeTimeout: 2,
-    logLevel: 'warn',
+    grainInvokeTimeout: 5,
+    maxWorkers: 4,
+    logLevel: 'info',
     grains: {
       TestGrain: class extends Grain {
 
-        async longRunningMethod() {
-          await delay(4 * 1000);
+        async longRunningMethod(seconds) {
+          await delay(seconds * 1000);
           return 'done';
+        }
+        async onDeactivate() {
+          console.log('grain onDeactivate');
         }
 
       }
@@ -27,9 +31,9 @@ const delay = async (ms) => new Promise((resolve) =>{
   if (silo.isWorker) {
     try {
       const grain = await GrainFactory.getGrain('TestGrain', 1);
-      console.log(await grain.longRunningMethod());
+      console.log(await grain.longRunningMethod(6));
     } catch (e) {
-      console.error(`error from grain: ${e}`);
+      console.error(`pid ${process.pid} error from grain: ${e}`);
     }
   }
 })();
