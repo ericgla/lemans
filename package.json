@@ -1,14 +1,13 @@
 {
   "name": "lemans",
-  "version": "1.0.0",
-  "description": "Virtual actor framework for javascript, insprired by Orleans (https://github.com/dotnet/orleans)",
+  "version": "0.0.1",
+  "description": "Virtual actor for node.js",
   "main": "index.js",
   "license": "MIT",
   "scripts": {
     "test": "./node_modules/.bin/jasmine-node spec"
   },
   "dependencies": {
-    "express": "^4.15.4",
     "moment": "^2.18.1",
     "serialize-error": "^2.1.0",
     "uuid": "^3.1.0",
