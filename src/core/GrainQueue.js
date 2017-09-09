@@ -1,47 +1,46 @@
 const winston = require('winston');
 const Queue = require('../util/Queue');
 
+/**
+ *  Queues actions for a grain activation, and sends the actions sequentially to the grain instance on the worker.
+ */
 module.exports = class GrainQueue {
 
-  constructor(identity, runtime) {
+  constructor(identity, runtime, fn) {
     this._identity = identity;
     this._runtime = runtime;
     this._methodQueue = new Queue();
     this._processing = false;
-    this._onProcessing = () => {};
+    this._onProcessing = fn;
   }
 
-  async add(fn, type) {
-    winston.debug(`master enqueue for identity ${this._identity}`);
-
+  async add(fn, meta) {
     this._methodQueue.enqueue({
       fn,
-      type
+      meta
     });
-
+    winston.debug(`pid ${process.pid} enqueue for identity ${this._identity} ${meta.action} new queue size ${this._methodQueue.size}`);
     if (!this._processing) {
       // start processing any queued grain calls
       this._processing = true;
-      setTimeout(this._processQueueItem.bind(this), 1);
+      setTimeout(this._processQueueItem.bind(this), 10);
     }
   }
 
   async _processQueueItem() {
     if (this._methodQueue.size > 0) {
-      const item = this._methodQueue.dequeue();
-      this._onProcessing(this._methodQueue.size, item.type);
-      winston.debug(`pid ${process.pid} dqeueue for identity ${this._identity}`);
+      this._processing = true;
+
+      this._currentItem = this._methodQueue.dequeue();
+      winston.debug(`pid ${process.pid} dequeue for identity ${this._identity} ${this._currentItem.meta.action} new queue size ${this._methodQueue.size}`);
       try {
-        await item.fn();
+        await this._currentItem.fn();
+        this._onProcessing(this._methodQueue.size, this._currentItem.meta.action);
+        this._processQueueItem();
       } catch (e) {} // swallow the error here since the reject handler will have already been called to forward the error
-      await this._processQueueItem();
     } else {
       this._processing = false;
-      this._onProcessing(this._methodQueue.size);
-    }
-  }
 
-  onProcessing(fn) {
-    this._onProcessing = fn;
+    }
   }
 };

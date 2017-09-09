@@ -9,6 +9,12 @@ const winston = require('winston');
 let workerReady;
 let stopWorker;
 
+/**
+ *  Silo runtime that runs on the worker process.
+ *
+ *  This runtime forwards all grain actions to the master runtime for sequencing, and executes actions on grain instances.
+ *  The worker runtime contains the grain instances in _localGrainMap.
+ */
 module.exports = class WorkerRuntime extends SiloRuntime {
 
   constructor(config) {
@@ -44,17 +50,13 @@ module.exports = class WorkerRuntime extends SiloRuntime {
     return this._grainFactory;
   }
 
-  /*
+  /**
    *  add onDeactivate to the proxy queue.  the grain will signal the master to de-register once
    *  onDeactivate is actually called
    */
-  async queueEndActivation(identity) {
+  async deactivateOnIdle(identity) {
     winston.debug(`pid ${process.pid} queueing deactivation for ${identity}`);
-    if (this._grainProxyMap.has(identity)) {
-      await this._grainProxyMap.get(identity).onDeactivate();
-    } else {
-      console.error(`pid ${process.pid} no activation to queue deactivation for identity ${identity}`);
-    }
+
   }
 
   async deactivate(payload) {
@@ -78,7 +80,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
     }
   }
 
-  async getGrainActivation(grainReference, key) {
+  async getGrainProxy(grainReference, key) {
     if (!(grainReference in this._grainProxies)) {
       throw new Error(`unknown grain type ${grainReference}`);
     }

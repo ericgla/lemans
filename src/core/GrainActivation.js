@@ -1,4 +1,5 @@
 const GrainQueue = require('./GrainQueue');
+const winston = require('winston');
 
 const ActivationState = {
   ACTIVATING: 'activating',
@@ -8,13 +9,16 @@ const ActivationState = {
   DEACTIVATED: 'deactivated'
 };
 
+/**
+ *  Manages the activation of a grain in the Master Runtime.  Queues all grain instance actions and sends the actions
+ *  sequentially to the grain instance on a worker.
+ */
 class GrainActivation {
 
   constructor(identity, runtime) {
     this._identity = identity;
     this._runtime = runtime;
-    this._grainQueue = new GrainQueue(identity, runtime);
-    this._grainQueue.onProcessing(() => this._onProcessing);
+    this._grainQueue = new GrainQueue(identity, runtime, this._onProcessing);
     this._state = ActivationState.ACTIVATING;
     this._lastActivity = new Date();
   }
@@ -28,7 +32,7 @@ class GrainActivation {
     this._pid = pid;
   }
 
-  add(fn, type) {
+  add(fn, type = {}) {
     this._grainQueue.add(fn, type);
   }
 
@@ -40,9 +44,10 @@ class GrainActivation {
     return this._lastActivity;
   }
 
-  _onProcessing(size, type) {
+  _onProcessing(size, action) {
+    winston.info(`pid ${process.pid} ${this._identity} completed ${action} pending actions: ${size}`);
     this._lastActivity = new Date();
-    if (type === 'onDeactivate') {
+    if (action === 'onDeactivate') {
       this._state = ActivationState.DEACTIVATING;
     }
   }

@@ -1,5 +1,8 @@
 const uuidv4 = require('../util/uuid');
 
+/**
+ * base class for the master and worker runtime.  Handles all deferred promises
+ */
 class SiloRuntime {
   constructor() {
     this.deferred = new Map();

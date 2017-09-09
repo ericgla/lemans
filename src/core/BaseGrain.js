@@ -1,6 +1,6 @@
 /**
- *  base class for Grain.
- *  the grain proxies are generated from Grain and it's subclass, so any method that
+ *  base class for a grain.
+ *  the grain proxies are generated from Grain and it's subclass, so any methods that
  *  do not require a proxy method (methods that are private to the grain) go here.
  */
 module.exports = class BaseGrain {
@@ -19,7 +19,7 @@ module.exports = class BaseGrain {
   }
 
   async deactivateOnIdle() {
-    this.runtime.queueEndActivation(this.identity);
+    this.runtime.deactivateOnIdle(this.identity);
   }
 
   getLogger() {}

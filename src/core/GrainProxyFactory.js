@@ -1,6 +1,11 @@
 const winston = require('winston');
 const Grain = require('./Grain');
 
+/**
+ *  Builds proxy classes for all grain types at silo startup.  These generated proxy classes will be instantiated
+ *  by the worker runtime to call methods on a grain instance.  Note that the actual grain instance may live on a different
+ *  worker process, and all calls to the grain instance are sequenced by the master runtime.
+ */
 const createGrainProxy = (grainReference, grainClass, runtime) => {
 
   function GrainProxy(key, identity) {
@@ -10,7 +15,7 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
     this._grainClass = grainClass;
   };
 
-  /*
+  /**
    * add the base class proxy methods first.  if the grain subclass has overridden any base methods,
    * the proxy methods will also be overridden
    */

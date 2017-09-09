@@ -1,5 +1,8 @@
 const cluster = require('cluster');
 
+/**
+ * looks up the worker index by the process id
+ */
 const getWorkerByPid = (pid) => {
   let index;
   Object.keys(cluster.workers).forEach((key) => {
@@ -17,7 +20,11 @@ const getWorkerByPid = (pid) => {
  */
 const getNextWorkerIndex = (numWorkers) => {
   return Math.floor(Math.random() * (numWorkers - 1) + 1);
-}
+};
+
+/**
+ *  Provides a layer of abstraction to the transport used for messaging between workers. (incomplete)
+ */
 
 module.exports = class WorkerManager {
 

@@ -5,6 +5,12 @@ const Messages = require('./Messages');
 const winston = require('winston');
 const WorkerManager = require('./WorkerManager');
 
+/**
+ *  Silo runtime that runs on the master process.
+ *
+ *  This runtime acts as a broker for actions on a grain, and ensures that all actions run in sequence on a
+ *  single instance of a grain.  The master runtime does not contain any actual grain instances.
+ */
 module.exports = class MasterRuntime extends SiloRuntime {
 
   constructor(config) {
@@ -96,10 +102,6 @@ module.exports = class MasterRuntime extends SiloRuntime {
     });
   }
 
-  async getGrainActivation() {
-    throw new Error('access to grain activations can only be made on workers.  Use silo.isWorker to check if you are on a worker.');
-  }
-
   /*
    * private
    */
@@ -130,7 +132,9 @@ module.exports = class MasterRuntime extends SiloRuntime {
         const msg = Object.assign({}, payload, { msg: Messages.CREATE_ACTIVATION, uuid });
         const activationPid = this._workerManager.sendToNextAvailableWorker(msg);
         activation.activationPid = activationPid;
-      }));
+      }),
+      { action: 'activation'}
+      );
       this._grainActivationMap.set(identity, activation);
     }
   }
@@ -155,10 +159,12 @@ module.exports = class MasterRuntime extends SiloRuntime {
       // so that the deferred promise can be resolved when the worker responds
       const activationPid = this._grainActivationMap.get(payload.identity).activationPid;
       this._workerManager.sendToWorker(activationPid, Object.assign({}, payload, { uuid }));
-    }));
+    }),
+    { action: payload.method}
+    );
   }
 
-  _deactivate(identity) {
+  _deactivate(identity, onIdle = false) {
     const activation = this._grainActivationMap.get(identity);
 
     activation.add(async () => new Promise((resolve, reject) => {
@@ -175,7 +181,9 @@ module.exports = class MasterRuntime extends SiloRuntime {
         `timeout on deactivate for identity ${identity}`
       );
       this._workerManager.sendToWorker(activation.activationPid, { identity, msg: Messages.DEACTIVATE, uuid });
-    }));
+    }),
+    { action: 'deactivate' }
+    );
   }
 
   async _processIncomingMessage(payload, pid) {
@@ -206,6 +214,10 @@ module.exports = class MasterRuntime extends SiloRuntime {
 
       case Messages.INVOKE_ERROR:
         this.getDeferredPromise(payload.uuid).reject(payload.error);
+        break;
+
+      case Messages.DEACTIVATE:
+        this._deactivate(payload.identity, true);
         break;
 
       case Messages.DEACTIVATED:

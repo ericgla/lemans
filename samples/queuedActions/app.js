@@ -18,6 +18,7 @@ const delay = async (ms) => new Promise((resolve) =>{
           await delay(seconds * 1000);
           return 'done';
         }
+
         async onDeactivate() {
           console.log('grain onDeactivate');
         }
@@ -31,7 +32,7 @@ const delay = async (ms) => new Promise((resolve) =>{
   if (silo.isWorker) {
     try {
       const grain = await GrainFactory.getGrain('TestGrain', 1);
-      console.log(await grain.longRunningMethod(6));
+      console.log(await grain.longRunningMethod(3));
     } catch (e) {
       console.error(`pid ${process.pid} error from grain: ${e}`);
     }
