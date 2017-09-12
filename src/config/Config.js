@@ -11,10 +11,12 @@ module.exports = class Config {
   }
 
   static verifyConfig(config) {
+
     Object.keys(config.grains).forEach((key) => {
       if (!(config.grains[key].prototype instanceof Grain)) {
         throw new Error(`${key} does not inherit from Grain`);
       }
     });
   }
+
 }

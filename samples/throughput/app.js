@@ -3,7 +3,6 @@ const grains = require('./grains');
 const GrainFactory = require('../../src/core/GrainFactory');
 const cluster = require('cluster');
 const moment = require('moment');
-const winston = require('winston');
 
 const iterations = 1000;
 
@@ -39,7 +38,7 @@ const invokeGrains = async (grainRefs) => {
   });
 
   await silo.start();
-  if (cluster.isWorker) {
+  if (Silo.isWorker) {
     try {
       const grainRefs = await createGrains();
       await invokeGrains(grainRefs);

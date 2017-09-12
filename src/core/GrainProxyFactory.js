@@ -1,6 +1,5 @@
-const winston = require('winston');
 const Grain = require('./Grain');
-
+const { Logger } = require('./Logger');
 /**
  *  Builds proxy classes for all grain types at silo startup.  These generated proxy classes will be instantiated
  *  by the worker runtime to call methods on a grain instance.  Note that the actual grain instance may live on a different
@@ -21,7 +20,7 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
    */
   Object.getOwnPropertyNames(Grain.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.debug(`pid ${process.pid} building worker proxy for grain base ${grainReference} ${method}`);
+      Logger.debug(`pid ${process.pid} building worker proxy for grain base ${grainReference} ${method}`);
 
       GrainProxy.prototype[method] = function (...args) {
         return this._runtime.invoke({
@@ -35,7 +34,7 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
 
   Object.getOwnPropertyNames(grainClass.prototype).forEach((method) => {
     if (method !== 'constructor') {
-      winston.debug(`pid ${process.pid} building worker proxy for grain ${grainReference} ${method}`);
+      Logger.debug(`pid ${process.pid} building worker proxy for grain ${grainReference} ${method}`);
 
       GrainProxy.prototype[method] = function (...args) {
         return this._runtime.invoke({

@@ -1,6 +1,5 @@
-const winston = require('winston');
 const Queue = require('../util/Queue');
-
+const { Logger } = require('./Logger');
 /**
  *  Queues actions for a grain activation, and sends the actions sequentially to the grain instance on the worker.
  */
@@ -19,11 +18,11 @@ module.exports = class GrainQueue {
       fn,
       meta
     });
-    winston.debug(`pid ${process.pid} enqueue for identity ${this._identity} ${meta.action} new queue size ${this._methodQueue.size}`);
+    Logger.debug(`pid ${process.pid} enqueue for identity ${this._identity} ${meta.action} new queue size ${this._methodQueue.size}`);
     if (!this._processing) {
       // start processing any queued grain calls
       this._processing = true;
-      setTimeout(this._processQueueItem.bind(this), 10);
+      setTimeout(this._processQueueItem.bind(this), 1);
     }
   }
 
@@ -32,15 +31,16 @@ module.exports = class GrainQueue {
       this._processing = true;
 
       this._currentItem = this._methodQueue.dequeue();
-      winston.debug(`pid ${process.pid} dequeue for identity ${this._identity} ${this._currentItem.meta.action} new queue size ${this._methodQueue.size}`);
+      Logger.debug(`pid ${process.pid} dequeue for identity ${this._identity} ${this._currentItem.meta.action} new queue size ${this._methodQueue.size}`);
       try {
         await this._currentItem.fn();
         this._onProcessing(this._methodQueue.size, this._currentItem.meta.action);
         this._processQueueItem();
-      } catch (e) {} // swallow the error here since the reject handler will have already been called to forward the error
+      } catch (e) {
+        Logger.error(`error processing action ${this._currentItem.meta.action} on identity ${this._identity} ${e}`);
+      }
     } else {
       this._processing = false;
-
     }
   }
 };

@@ -1,5 +1,4 @@
 const Grain = require('../../../src/core/Grain');
-const winston = require('winston');
 
 module.exports = class EchoGrain extends Grain {
 

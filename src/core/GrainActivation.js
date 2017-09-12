@@ -1,5 +1,5 @@
 const GrainQueue = require('./GrainQueue');
-const winston = require('winston');
+const { Logger } = require('./Logger');
 
 const ActivationState = {
   ACTIVATING: 'activating',
@@ -45,7 +45,7 @@ class GrainActivation {
   }
 
   _onProcessing(size, action) {
-    winston.info(`pid ${process.pid} ${this._identity} completed ${action} pending actions: ${size}`);
+    Logger.info(`pid ${process.pid} ${this._identity} completed ${action} pending actions: ${size}`);
     this._lastActivity = new Date();
     if (action === 'onDeactivate') {
       this._state = ActivationState.DEACTIVATING;

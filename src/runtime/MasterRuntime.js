@@ -2,9 +2,8 @@ const { GrainActivation } = require('../core/GrainActivation');
 const cluster = require('cluster');
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
-const winston = require('winston');
 const WorkerManager = require('./WorkerManager');
-
+const { Logger } = require('../core/Logger');
 /**
  *  Silo runtime that runs on the master process.
  *
@@ -13,19 +12,21 @@ const WorkerManager = require('./WorkerManager');
  */
 module.exports = class MasterRuntime extends SiloRuntime {
 
-  constructor(config) {
+  constructor(silo) {
     super();
-    this._config = config;
+    this._silo = silo;
     this._grainActivationMap = new Map();
     this._workerManager = new WorkerManager(this);
+
     process.on('unhandledRejection', (reason, p) => {
-      winston.error('Unhandled Rejection in master runtime at: Promise', p, 'reason:', reason);
+      Logger.error('Unhandled Rejection in worker runtime at: Promise', p, 'reason:', reason);
     });
+
     this._deactivationHandle = setInterval(() => {
       const now = new Date();
       this._grainActivationMap.forEach((activation, identity) => {
-        if ((now - activation.lastActivityDate) / 1000 > this._config.grainDeactivateOnIdle) {
-          winston.info(`idle deactivating ${identity}`);
+        if ((now - activation.lastActivityDate) / 1000 > this._silo._config.grainDeactivateOnIdle) {
+          Logger.info(`idle deactivating ${identity}`);
           this._deactivate(identity);
           this._grainActivationMap.delete(identity);
         }
@@ -38,8 +39,8 @@ module.exports = class MasterRuntime extends SiloRuntime {
    */
   async start() {
     return new Promise(async (resolve) => {
-      this.numWorkers = this._config.maxWorkers;
-      winston.info(`pid ${process.pid} starting silo master runtime with ${this.numWorkers} workers`);
+      this.numWorkers = this._silo._config.maxWorkers;
+      Logger.info(`pid ${process.pid} starting silo master runtime with ${this.numWorkers} workers`);
       let onlineWorkers = 0;
 
       for (let i = 0; i < this.numWorkers; i++) {
@@ -54,13 +55,13 @@ module.exports = class MasterRuntime extends SiloRuntime {
           // the worker isn't ready to process messages until the worker runtime's constructor is called
           // not sure if we really need to do this, or there is a different worker message to listen for
           if (payload.msg === Messages.WORKER_READY) {
-            winston.debug(`worker id ${worker.id} pid ${worker.process.pid} ready.`);
+            Logger.debug(`worker id ${worker.id} pid ${worker.process.pid} ready.`);
             worker.on('message', (p) => {
               this._processIncomingMessage(p, worker.process.pid);
             });
             onlineWorkers += 1;
             if (this.numWorkers === onlineWorkers) {
-              winston.info(`pid ${process.pid} all ${onlineWorkers} workers ready.`);
+              Logger.info(`pid ${process.pid} all ${onlineWorkers} workers ready.`);
               Object.keys(cluster.workers).forEach((key) => {
                 cluster.workers[key].send({ msg: Messages.MASTER_READY });
               });
@@ -69,17 +70,17 @@ module.exports = class MasterRuntime extends SiloRuntime {
           }
         });
       });
-      cluster.on('disconnect', () => { winston.error('worker disconnect'); });
-      cluster.on('exit', () => { winston.error('worker exit'); });
-      cluster.on('error', () => { winston.error('worker error'); });
+      cluster.on('disconnect', () => { Logger.error('worker disconnect'); });
+      cluster.on('exit', () => { Logger.error('worker exit'); });
+      cluster.on('error', () => { Logger.error('worker error'); });
     });
   }
 
   async stop() {
-    winston.info(`pid ${process.pid} stopping silo master runtime`);
+    Logger.info(`pid ${process.pid} stopping silo master runtime`);
     clearInterval(this._deactivationHandle);
     this._grainActivationMap.forEach((activation, identity) => {
-      winston.info(`idle deactivating ${identity}`);
+      Logger.info(`idle deactivating ${identity}`);
       this._deactivate(identity);
       this._grainActivationMap.delete(identity);
     });
@@ -123,7 +124,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
             this._workerManager.sendToWorker(payload.fromPid, Object.assign({}, payload, { identity, msg: Messages.ACTIVATION_ERROR, error }));
             reject(error);
           },
-          this._config.grainActivateTimeout * 1000,
+          this._silo._config.grainActivateTimeout * 1000,
           `timeout on activation for identity ${identity}`
         );
 
@@ -152,7 +153,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
           this._workerManager.sendToWorker(pid, Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
           reject(error);
         },
-        this._config.grainInvokeTimeout * 1000,
+        this._silo._config.grainInvokeTimeout * 1000,
         `timeout on invoke for identity ${payload.identity} method ${payload.method}`
       );
       // forward the invoke message to the worker containing the grain, and change the response uuid
@@ -174,10 +175,10 @@ module.exports = class MasterRuntime extends SiloRuntime {
           resolve();
         },
         (error) => {
-          winston.error(error);
+          Logger.error(error);
           reject(error);
         },
-        this._config.grainInvokeTimeout * 1000,
+        this._silo.config.grainInvokeTimeout * 1000,
         `timeout on deactivate for identity ${identity}`
       );
       this._workerManager.sendToWorker(activation.activationPid, { identity, msg: Messages.DEACTIVATE, uuid });
@@ -187,7 +188,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
   }
 
   async _processIncomingMessage(payload, pid) {
-    winston.debug(`master got msg from pid ${pid}: ${JSON.stringify(payload)}`);
+    Logger.debug(`master got msg from pid ${pid}: ${JSON.stringify(payload)}`);
     const identity = this.getIdentityString(payload.grainReference, payload.key);
     switch (payload.msg) {
 

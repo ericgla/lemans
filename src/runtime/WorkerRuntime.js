@@ -4,7 +4,7 @@ const cluster = require('cluster');
 const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
 const serializeError = require('serialize-error');
-const winston = require('winston');
+const { Logger } = require('../core/Logger');
 
 let workerReady;
 let stopWorker;
@@ -17,16 +17,15 @@ let stopWorker;
  */
 module.exports = class WorkerRuntime extends SiloRuntime {
 
-  constructor(config) {
+  constructor(silo) {
     super();
-    this._grainProxies = WorkerProxyFactory.create(config.grains, this);
+    this._silo = silo;
     this._grainProxyMap = new Map();
     this._localGrainMap = new Map();
+    this._grainFactory = new GrainFactory(this);
     process.on('unhandledRejection', (reason, p) => {
-      winston.error('Unhandled Rejection in worker runtime at: Promise', p, 'reason:', reason);
+      Logger.error('Unhandled Rejection in worker runtime at: Promise', p, 'reason:', reason);
     });
-    cluster.worker.on('message', this._processIncomingMessage.bind(this));
-    cluster.worker.send({ msg: Messages.WORKER_READY });
   }
 
   /*
@@ -34,13 +33,16 @@ module.exports = class WorkerRuntime extends SiloRuntime {
    */
 
   async start() {
-    winston.debug(`pid ${process.pid} starting silo worker runtime`);
-    this._grainFactory = new GrainFactory(this);
+    Logger.debug(`pid ${process.pid} starting silo worker runtime`);
+    this._grainProxies = WorkerProxyFactory.create(this._silo._config.grains, this);
+    cluster.worker.on('message', this._processIncomingMessage.bind(this));
+    cluster.worker.send({ msg: Messages.WORKER_READY });
+
     return new Promise((resolve) => { workerReady = resolve; });
   }
 
   async stop() {
-    winston.info(`pid ${process.pid} stopping silo worker runtime`);
+    Logger.info(`pid ${process.pid} stopping silo worker runtime`);
     cluster.worker.send({ msg: Messages.STOP_SILO });
     this._grainFactory = undefined;
     return new Promise((resolve) => { stopWorker = resolve; });
@@ -50,23 +52,27 @@ module.exports = class WorkerRuntime extends SiloRuntime {
     return this._grainFactory;
   }
 
+  get logger() {
+    return Logger;
+  }
+
   /**
    *  add onDeactivate to the proxy queue.  the grain will signal the master to de-register once
    *  onDeactivate is actually called
    */
   async deactivateOnIdle(identity) {
-    winston.debug(`pid ${process.pid} queueing deactivation for ${identity}`);
+    Logger.debug(`pid ${process.pid} queueing deactivation for ${identity}`);
 
   }
 
   async deactivate(payload) {
-    winston.info(`pid ${process.pid} deactivating ${payload.identity}`);
+    Logger.info(`pid ${process.pid} deactivating ${payload.identity}`);
     try {
       // remove the proxy first
       if (this._grainProxyMap.has(payload.identity)) {
         this._grainProxyMap.delete(payload.identity);
       } else {
-        winston.warn(`pid ${process.pid} no proxy to remove for identity ${payload.identity}`);
+        Logger.warn(`pid ${process.pid} no proxy to remove for identity ${payload.identity}`);
       }
       // if we have the grain activation local, remove it
       if (this._localGrainMap.has(payload.identity)) {
@@ -112,7 +118,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
 
   async _processIncomingMessage(payload) {
     const p = Object.assign({}, payload);
-    winston.debug(`pid ${process.pid} worker got msg: ${JSON.stringify(payload)}`);
+    Logger.debug(`pid ${process.pid} worker got msg: ${JSON.stringify(payload)}`);
     switch (payload.msg) {
 
       case Messages.MASTER_READY: {
@@ -124,7 +130,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
         try {
           const identity = this.getIdentityString(payload.grainReference, payload.key);
           if (!this._localGrainMap.has(identity)) {
-            winston.debug(`pid ${process.pid} new grain activation identity ${identity}`);
+            Logger.debug(`pid ${process.pid} new grain activation identity ${identity}`);
 
             const activation = new this._grainProxies[payload.grainReference](payload.key, identity);
             this._grainProxyMap.set(identity, activation);
@@ -188,7 +194,7 @@ module.exports = class WorkerRuntime extends SiloRuntime {
   async _getRemoteGrainActivation(grainReference, key) {
     return new Promise((resolve, reject) => {
       const uuid = this.setDeferredPromise(resolve, reject);
-      winston.debug(`pid ${process.pid} sending getGrainActivation uuid ${uuid}`);
+      Logger.debug(`pid ${process.pid} sending getGrainActivation uuid ${uuid}`);
       cluster.worker.send({
         msg: Messages.GET_ACTIVATION,
         fromPid: process.pid,
