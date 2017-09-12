@@ -1,8 +1,8 @@
 {
   "name": "lemans",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Virtual actor framework for node.js",
-  "url" : "https://github.com/ericgla/lemans",
+  "repository": "ericgla/lemans",
   "main": "index.js",
   "license": "MIT",
   "scripts": {
