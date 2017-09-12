@@ -178,7 +178,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
           Logger.error(error);
           reject(error);
         },
-        this._silo.config.grainInvokeTimeout * 1000,
+        this._silo._config.grainInvokeTimeout * 1000,
         `timeout on deactivate for identity ${identity}`
       );
       this._workerManager.sendToWorker(activation.activationPid, { identity, msg: Messages.DEACTIVATE, uuid });
