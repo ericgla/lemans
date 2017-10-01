@@ -7,12 +7,20 @@ const { Logger } = require('./Logger');
  */
 const createGrainProxy = (grainReference, grainClass, runtime) => {
 
-  function GrainProxy(key, identity) {
-    this._key = key;
-    this._identity = identity;
-    this._runtime = runtime;
-    this._grainClass = grainClass;
-  };
+  class GrainProxy {
+
+    constructor(key, identity) {
+      this._key = key;
+      this._identity = identity;
+      this._runtime = runtime;
+      this._grainClass = grainClass;
+    }
+
+    get GrainClass() {
+      return this._grainClass;
+    }
+
+  }
 
   /**
    * add the base class proxy methods first.  if the grain subclass has overridden any base methods,
@@ -45,6 +53,7 @@ const createGrainProxy = (grainReference, grainClass, runtime) => {
       };
     }
   });
+
   return GrainProxy;
 }
 

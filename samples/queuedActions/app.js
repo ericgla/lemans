@@ -1,7 +1,8 @@
 const Silo = require('../../src/runtime/Silo');
 const Grain = require('../../src/core/Grain');
+const StatefulGrain = require('../../src/core/StatefulGrain');
 const GrainFactory = require('../../src/core/GrainFactory');
-const ConsoleLogger = require('../../src/modules/ConsoleLogger');
+const MemoryStorage = require('../../src/modules/MemoryStorage');
 
 const delay = async ms => new Promise((resolve) =>{
   setTimeout(() => resolve(), ms);
@@ -11,19 +12,23 @@ const delay = async ms => new Promise((resolve) =>{
   const silo = new Silo({
     grainInvokeTimeout: 5,
     maxWorkers: 4,
-    logLevel: 'debug',
+    logLevel: 'info',
+    modules: {
+      storage: MemoryStorage
+    },
     grains: {
-      TestGrain: class extends Grain {
+      TestGrain: class extends StatefulGrain {
 
         async longRunningMethod(seconds) {
           await delay(seconds * 1000);
+          this.setState({ test: 'test' });
           return 'done';
         }
 
         async onDeactivate() {
+          super.onDeactivate();
           console.log('grain onDeactivate');
         }
-
       }
     }
   });

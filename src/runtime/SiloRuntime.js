@@ -4,6 +4,7 @@ const uuidv4 = require('../util/uuid');
  * base class for the master and worker runtime.  Handles all deferred promises
  */
 class SiloRuntime {
+
   constructor() {
     this.deferred = new Map();
   }
@@ -43,6 +44,24 @@ class SiloRuntime {
 
   getIdentityString(grainReference, key) {
     return `${grainReference}_${key}`;
+  }
+
+  moduleApi(moduleName) {
+    return {
+      addMessageHandler: (messageType, handler) => {
+        if (this._messageHandlerMap.has(messageType)) {
+          this._messageHandlerMap.set(messageType, handler);
+        }
+      },
+      removeMessageHandler: (messageType) => {
+        if (this._messageHandlerMap.has(messageType)) {
+          this._messageHandlerMap.delete(messageType);
+        }
+      },
+      sendMessage: (pid, message) => {
+        this._workerManager.send(pid, message);
+      }
+    };
   }
 }
 module.exports = SiloRuntime;

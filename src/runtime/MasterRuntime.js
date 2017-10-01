@@ -4,6 +4,9 @@ const SiloRuntime = require('./SiloRuntime');
 const Messages = require('./Messages');
 const WorkerManager = require('./WorkerManager');
 const { Logger } = require('../core/Logger');
+
+let stopMaster;
+
 /**
  *  Silo runtime that runs on the master process.
  *
@@ -16,11 +19,23 @@ module.exports = class MasterRuntime extends SiloRuntime {
     super();
     this._silo = silo;
     this._grainActivationMap = new Map();
+    this._messageHandlerMap = new Map();
+    this._modules = {};
+    if (silo._config._modules) {
+      this._initModules(silo._config._modules);
+    }
     this._workerManager = new WorkerManager(this);
 
     process.on('unhandledRejection', (reason, p) => {
       Logger.error('Unhandled Rejection in worker runtime at: Promise', p, 'reason:', reason);
     });
+  }
+
+  get GrainFactory() {
+    return this._grainFactory;
+  }
+
+  async start() {
 
     this._deactivationHandle = setInterval(() => {
       const now = new Date();
@@ -32,12 +47,7 @@ module.exports = class MasterRuntime extends SiloRuntime {
         }
       });
     }, 1 * 1000);
-  }
 
-  /*
-   * public
-   */
-  async start() {
     return new Promise(async (resolve) => {
       this.numWorkers = this._silo._config.maxWorkers;
       Logger.info(`pid ${process.pid} starting silo master runtime with ${this.numWorkers} workers`);
@@ -56,9 +66,19 @@ module.exports = class MasterRuntime extends SiloRuntime {
           // not sure if we really need to do this, or there is a different worker message to listen for
           if (payload.msg === Messages.WORKER_READY) {
             Logger.debug(`worker id ${worker.id} pid ${worker.process.pid} ready.`);
-            worker.on('message', (p) => {
-              this._processIncomingMessage(p, worker.process.pid);
+
+            this._addMessageHandlers();
+            worker.on('message', async (p) => {
+              Logger.debug(`master got msg from pid ${worker.process.pid}: ${JSON.stringify(p)}`);
+              if (this._messageHandlerMap.has(p.msg)) {
+                const handler = this._messageHandlerMap.get(p.msg);
+                await handler(p, worker.process.pid);
+              }
+              else {
+                Logger.error(`no master message handler for message ${payload.msg}`);
+              }
             });
+
             onlineWorkers += 1;
             if (this.numWorkers === onlineWorkers) {
               Logger.info(`pid ${process.pid} all ${onlineWorkers} workers ready.`);
@@ -78,16 +98,18 @@ module.exports = class MasterRuntime extends SiloRuntime {
 
   async stop() {
     Logger.info(`pid ${process.pid} stopping silo master runtime`);
+    const promises = [];
     clearInterval(this._deactivationHandle);
     this._grainActivationMap.forEach((activation, identity) => {
-      Logger.info(`idle deactivating ${identity}`);
-      this._deactivate(identity);
+      Logger.info(`silo stop - deactivating ${identity}`);
+      promises.push(this._deactivate(identity));
       this._grainActivationMap.delete(identity);
     });
-  }
-
-  get GrainFactory() {
-    return this._grainFactory;
+    Promise.all(promises).then(() => {
+      stopMaster();
+      process.exit(0);
+    });
+    return new Promise((resolve) => { stopMaster = resolve; });
   }
 
   async invoke({ identity, method, args }) {
@@ -103,13 +125,16 @@ module.exports = class MasterRuntime extends SiloRuntime {
     });
   }
 
-  /*
-   * private
-   */
+  async _initModules(modules) {
+    if (modules.storage) {
+      this._modules.storage = modules.storage(this.moduleApi('storage'));
+    }
+  }
 
-  async _getActivation(pid, identity, payload) {
+  async _getActivation(pid, payload) {
+    const identity = this.getIdentityString(payload.grainReference, payload.key);
     if (this._grainActivationMap.has(identity)) {
-      // the grain is already active.  no need to queue since there is no actual work to do
+      // the grain is already active.  just tell the worker to create the proxy
       this._workerManager.sendToWorker(pid, Object.assign({}, payload, { msg: Messages.ACTIVATED }));
     } else {
       const activation = new GrainActivation(identity, this);
@@ -117,11 +142,13 @@ module.exports = class MasterRuntime extends SiloRuntime {
       activation.add(async () => new Promise((resolve, reject) => {
         const uuid = this.setDeferredPromise(
           () => {
-            this._workerManager.sendToWorker(payload.fromPid, Object.assign({}, payload, { identity, msg: Messages.ACTIVATED}));
+            const responsePayload = Object.assign({}, payload, { identity, msg: Messages.ACTIVATED});
+            this._workerManager.sendToWorker(payload.fromPid, responsePayload);
             resolve();
           },
           (error) => {
-            this._workerManager.sendToWorker(payload.fromPid, Object.assign({}, payload, { identity, msg: Messages.ACTIVATION_ERROR, error }));
+            const responsePayload = Object.assign({}, payload, { identity, msg: Messages.ACTIVATION_ERROR, error });
+            this._workerManager.sendToWorker(payload.fromPid, responsePayload);
             reject(error);
           },
           this._silo._config.grainActivateTimeout * 1000,
@@ -165,13 +192,14 @@ module.exports = class MasterRuntime extends SiloRuntime {
     );
   }
 
-  _deactivate(identity, onIdle = false) {
+  async _deactivate(identity, onIdle = false) {
     const activation = this._grainActivationMap.get(identity);
+    let deactivated;
 
     activation.add(async () => new Promise((resolve, reject) => {
       const uuid = this.setDeferredPromise(
         () => {
-          // TODO - broadcast deactivation to all workers
+          deactivated();
           resolve();
         },
         (error) => {
@@ -181,57 +209,35 @@ module.exports = class MasterRuntime extends SiloRuntime {
         this._silo._config.grainInvokeTimeout * 1000,
         `timeout on deactivate for identity ${identity}`
       );
-      this._workerManager.sendToWorker(activation.activationPid, { identity, msg: Messages.DEACTIVATE, uuid });
+      this._workerManager.broadcast({ identity, msg: Messages.DEACTIVATE, uuid });
     }),
     { action: 'deactivate' }
     );
+    return new Promise((resolve) => { deactivated = resolve; });
   }
 
-  async _processIncomingMessage(payload, pid) {
-    Logger.debug(`master got msg from pid ${pid}: ${JSON.stringify(payload)}`);
-    const identity = this.getIdentityString(payload.grainReference, payload.key);
-    switch (payload.msg) {
+  _addMessageHandlers() {
+    this._messageHandlerMap.set(Messages.GET_ACTIVATION, async (payload, pid) => this._getActivation(pid, payload));
 
-      case Messages.GET_ACTIVATION:
-        await this._getActivation(pid, identity, Object.assign({}, payload));
-        break;
+    this._messageHandlerMap.set(Messages.CREATED, async (payload, pid) => {
+      const identity = this.getIdentityString(payload.grainReference, payload.key);
+      this._grainActivationMap.get(identity).activationPid = pid;
+      this.getDeferredPromise(payload.uuid).resolve();
+    });
 
-      case Messages.CREATED:
-        this._grainActivationMap.get(identity).activationPid = pid;
-        this.getDeferredPromise(payload.uuid).resolve();
-        break;
+    this._messageHandlerMap.set(Messages.ACTIVATION_ERROR, async (payload) => this.getDeferredPromise(payload.uuid).reject(payload.error));
 
-      case Messages.ACTIVATION_ERROR:
-        this.getDeferredPromise(payload.uuid).reject(payload.error);
-        break;
+    this._messageHandlerMap.set(Messages.INVOKE, async (payload, pid) => this._invoke(pid, payload));
 
-      case Messages.INVOKE:
-        this._invoke(pid, payload);
-        break;
+    this._messageHandlerMap.set(Messages.INVOKE_RESULT, async (payload) => this.getDeferredPromise(payload.uuid).resolve(payload.result));
 
-      case Messages.INVOKE_RESULT:
-        this.getDeferredPromise(payload.uuid).resolve(payload.result);
-        break;
+    this._messageHandlerMap.set(Messages.INVOKE_ERROR, async (payload) => this.getDeferredPromise(payload.uuid).reject(payload.error));
 
-      case Messages.INVOKE_ERROR:
-        this.getDeferredPromise(payload.uuid).reject(payload.error);
-        break;
+    this._messageHandlerMap.set(Messages.DEACTIVATE, async (payload) => this._deactivate(payload.identity, true));
 
-      case Messages.DEACTIVATE:
-        this._deactivate(payload.identity, true);
-        break;
+    this._messageHandlerMap.set(Messages.DEACTIVATED, async (payload) => this.getDeferredPromise(payload.uuid).resolve());
 
-      case Messages.DEACTIVATED:
-        this.getDeferredPromise(payload.uuid).resolve();
-        break;
-
-      case Messages.STOP_SILO:
-        this.stop();
-        break;
-
-      default:
-        break;
-    }
+    this._messageHandlerMap.set(Messages.STOP_SILO, async () => this.stop());
   }
 
 }

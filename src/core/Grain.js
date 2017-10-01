@@ -10,11 +10,5 @@ module.exports = class Grain extends BaseGrain {
 
   async onDeactivate() {}
 
-  async readState() {}
-
-  async writeState() {}
-
-  async clearState() {}
-
 }
 

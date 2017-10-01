@@ -8,11 +8,12 @@ module.exports = class Silo {
 
   constructor(config) {
     this._config = Config.create(config);
+
+    // if a logger is specified in the config, override the default logger
     if (config.logger) {
       setLogger(config.logger);
     }
     Logger.logLevel = config.logLevel;
-    this._modules = [];
   }
 
   async start() {
@@ -36,4 +37,4 @@ module.exports = class Silo {
     await this.runtime.stop();
   }
 
-}
+};

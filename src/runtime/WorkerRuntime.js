@@ -22,22 +22,30 @@ module.exports = class WorkerRuntime extends SiloRuntime {
     this._silo = silo;
     this._grainProxyMap = new Map();
     this._localGrainMap = new Map();
+    this._messageHandlerMap = new Map();
     this._grainFactory = new GrainFactory(this);
     process.on('unhandledRejection', (reason, p) => {
       Logger.error('Unhandled Rejection in worker runtime at: Promise', p, 'reason:', reason);
     });
   }
 
-  /*
-   * public
-   */
-
   async start() {
     Logger.debug(`pid ${process.pid} starting silo worker runtime`);
     this._grainProxies = WorkerProxyFactory.create(this._silo._config.grains, this);
-    cluster.worker.on('message', this._processIncomingMessage.bind(this));
-    cluster.worker.send({ msg: Messages.WORKER_READY });
 
+    this._addMessageHandlers();
+    cluster.worker.on('message', async (payload) => {
+      Logger.debug(`pid ${process.pid} worker got msg: ${JSON.stringify(payload)}`);
+      if (this._messageHandlerMap.has(payload.msg)) {
+        const handler = this._messageHandlerMap.get(payload.msg);
+        await handler(payload);
+      }
+      else {
+        Logger.error(`no worker message handler for message ${payload.msg}`);
+      }
+    });
+
+    cluster.worker.send({ msg: Messages.WORKER_READY });
     return new Promise((resolve) => { workerReady = resolve; });
   }
 
@@ -52,8 +60,8 @@ module.exports = class WorkerRuntime extends SiloRuntime {
     return this._grainFactory;
   }
 
-  get logger() {
-    return Logger;
+  get modules() {
+    return this._silo._config.modules;
   }
 
   /**
@@ -62,7 +70,6 @@ module.exports = class WorkerRuntime extends SiloRuntime {
    */
   async deactivateOnIdle(identity) {
     Logger.debug(`pid ${process.pid} queueing deactivation for ${identity}`);
-
   }
 
   async deactivate(payload) {
@@ -71,15 +78,13 @@ module.exports = class WorkerRuntime extends SiloRuntime {
       // remove the proxy first
       if (this._grainProxyMap.has(payload.identity)) {
         this._grainProxyMap.delete(payload.identity);
-      } else {
-        Logger.warn(`pid ${process.pid} no proxy to remove for identity ${payload.identity}`);
       }
       // if we have the grain activation local, remove it
       if (this._localGrainMap.has(payload.identity)) {
         await this._localGrainMap.get(payload.identity).onDeactivate();
         this._localGrainMap.delete(payload.identity);
+        cluster.worker.send(Object.assign({}, payload, { msg: Messages.DEACTIVATED }));
       }
-      cluster.worker.send(Object.assign({}, payload, { msg: Messages.DEACTIVATED }));
     } catch (e) {
       const error = serializeError(e);
       cluster.worker.send(Object.assign({}, payload, { msg: Messages.DEACTIVATED_ERROR, error }));
@@ -112,83 +117,64 @@ module.exports = class WorkerRuntime extends SiloRuntime {
     });
   }
 
-  /*
-   * private
-   */
+  async _createActivation(payload) {
+    try {
+      const identity = this.getIdentityString(payload.grainReference, payload.key);
+      if (!this._localGrainMap.has(identity)) {
+        Logger.debug(`pid ${process.pid} new grain activation identity ${identity}`);
 
-  async _processIncomingMessage(payload) {
-    const p = Object.assign({}, payload);
-    Logger.debug(`pid ${process.pid} worker got msg: ${JSON.stringify(payload)}`);
-    switch (payload.msg) {
+        const activation = new this._grainProxies[payload.grainReference](payload.key, identity);
+        this._grainProxyMap.set(identity, activation);
 
-      case Messages.MASTER_READY: {
-        workerReady();
-        break;
+        const grain = new activation.GrainClass(payload.key, identity, this);
+        this._localGrainMap.set(identity, grain);
+
+        await grain.onActivate();
+        cluster.worker.send(Object.assign({}, payload, { msg: Messages.CREATED }));
       }
-
-      case Messages.CREATE_ACTIVATION:
-        try {
-          const identity = this.getIdentityString(payload.grainReference, payload.key);
-          if (!this._localGrainMap.has(identity)) {
-            Logger.debug(`pid ${process.pid} new grain activation identity ${identity}`);
-
-            const activation = new this._grainProxies[payload.grainReference](payload.key, identity);
-            this._grainProxyMap.set(identity, activation);
-
-            const grain = new activation._grainClass(payload.key, identity, this);
-            this._localGrainMap.set(identity, grain);
-
-            await grain.onActivate();
-            cluster.worker.send(Object.assign({}, payload, { msg: Messages.CREATED }));
-          }
-        } catch (e) {
-          const error = serializeError(e);
-          cluster.worker.send(cluster.worker.send(Object.assign({}, p, {msg: Messages.ACTIVATION_ERROR, error})));
-        }
-        break;
-
-      case Messages.ACTIVATED:
-        const proxy = new this._grainProxies[payload.grainReference](payload.key, this.getIdentityString(payload.grainReference, payload.key));
-        this._grainProxyMap.set(payload.identity, proxy);
-        this.getDeferredPromise(payload.uuid).resolve(proxy);
-        break;
-
-      case Messages.ACTIVATION_ERROR:
-        // reject the pending promise for this message uuid
-        this.getDeferredPromise(payload.uuid).reject(payload.error);
-        break;
-
-      case Messages.INVOKE:
-        const grain = await this._localGrainMap.get(payload.identity);
-        try {
-          const result = await grain[payload.method](...payload.args);
-          cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
-        } catch (e) {
-          const error = serializeError(e);
-          cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
-        }
-        break;
-
-      case Messages.INVOKE_RESULT:
-        this.getDeferredPromise(payload.uuid).resolve(payload.result);
-        break;
-
-      case Messages.DEACTIVATE:
-        this.deactivate(payload);
-        break;
-
-      case Messages.INVOKE_ERROR:
-        this.getDeferredPromise(payload.uuid).reject(payload.error);
-        break;
-
-      case Messages.STOP_WORKER:
-        stopWorker();
-        process.stop();
-        break;
-
-      default:
-        break;
+    } catch (e) {
+      const error = serializeError(e);
+      cluster.worker.send(Object.assign({}, p, {msg: Messages.ACTIVATION_ERROR, error}));
     }
+  }
+
+  async _localInvoke(payload) {
+    const grain = await this._localGrainMap.get(payload.identity);
+    try {
+      const result = await grain[payload.method](...payload.args);
+      cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_RESULT, result }));
+    } catch (e) {
+      const error = serializeError(e);
+      cluster.worker.send(Object.assign({}, payload, { msg: Messages.INVOKE_ERROR, error }));
+    }
+  }
+
+  _addMessageHandlers() {
+    this._messageHandlerMap.set(Messages.MASTER_READY, () => workerReady());
+
+    this._messageHandlerMap.set(Messages.CREATE_ACTIVATION, async payload => this._createActivation(payload));
+
+    this._messageHandlerMap.set(Messages.ACTIVATED, async (payload) => {
+      const identity = this.getIdentityString(payload.grainReference, payload.key);
+      const proxy = new this._grainProxies[payload.grainReference](payload.key, identity);
+      this._grainProxyMap.set(payload.identity, proxy);
+      this.getDeferredPromise(payload.uuid).resolve(proxy);
+    });
+
+    this._messageHandlerMap.set(Messages.ACTIVATION_ERROR, async payload => this.getDeferredPromise(payload.uuid).reject(payload.error));
+
+    this._messageHandlerMap.set(Messages.INVOKE, async payload => this._localInvoke(payload));
+
+    this._messageHandlerMap.set(Messages.INVOKE_RESULT, async payload => this.getDeferredPromise(payload.uuid).resolve(payload.result));
+
+    this._messageHandlerMap.set(Messages.INVOKE_ERROR, async payload => this.getDeferredPromise(payload.uuid).reject(payload.error));
+
+    this._messageHandlerMap.set(Messages.DEACTIVATE, async payload => this.deactivate(payload));
+
+    this._messageHandlerMap.set(Messages.STOP_WORKER, async () => {
+      stopWorker();
+      process.exit(0);
+    });
   }
 
   async _getRemoteGrainActivation(grainReference, key) {
@@ -204,4 +190,5 @@ module.exports = class WorkerRuntime extends SiloRuntime {
       });
     });
   }
+
 }

@@ -6,7 +6,7 @@ const logLevel = {
   debug: 5
 };
 
-let _logLevel = 'info';
+let _logLevel = 5;
 
 class Logger {
 

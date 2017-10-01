@@ -42,4 +42,8 @@ module.exports = class WorkerManager {
     cluster.workers[availableWorker].send(message);
     return cluster.workers[availableWorker].process.pid;
   }
+
+  broadcast(message) {
+    Object.keys(cluster.workers).forEach(key => cluster.workers[key].send(message));
+  }
 }
